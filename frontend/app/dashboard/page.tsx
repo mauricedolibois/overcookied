@@ -10,6 +10,7 @@ import CookieBackground from '@/components/CookieBackground';
 interface User {
   username: string;
   id: number;
+  avatar: string;
 }
 
 export default function DashboardPage() {

@@ -3,6 +3,7 @@
 interface User {
   username: string;
   id: number;
+  avatar: string;
 }
 
 interface ProfileProps {
@@ -17,7 +18,7 @@ export default function Profile({ user, onLogout }: ProfileProps) {
         <div className="flex items-center space-x-4">
           {/* Avatar */}
           <div className="w-20 h-20 rounded-full bg-gradient-to-br from-[#f6e58d] to-[#f9ca24] flex items-center justify-center text-4xl shadow-sm">
-            🍪
+            {user.avatar}
           </div>
           
           {/* User Info */}

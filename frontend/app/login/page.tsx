@@ -16,8 +16,12 @@ export default function LoginPage() {
     // Simulate login - replace with actual API call
     setTimeout(() => {
       if (username && password) {
+        // Generate random emoji avatar
+        const avatars = ['🍪', '🧁', '🍰', '🎂', '🍩', '🥐', '🥖', '🥨', '🥯', '🧇', '🥞', '🍞', '🥧', '🍮', '🍯', '🧈', '🥛', '🍫', '🍬', '🍭'];
+        const randomAvatar = avatars[Math.floor(Math.random() * avatars.length)];
+        
         // Store user session (replace with proper auth)
-        localStorage.setItem('user', JSON.stringify({ username, id: Date.now() }));
+        localStorage.setItem('user', JSON.stringify({ username, id: Date.now(), avatar: randomAvatar }));
         router.push('/dashboard');
       }
       setIsLoading(false);
