@@ -1,4 +1,4 @@
-# Cookie Clicker
+# Overcookied
 
 A modern Cookie Clicker game built with Next.js 16 (frontend) and Go (backend), deployable on Kubernetes.
 

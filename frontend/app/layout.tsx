@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Cookie Clicker",
+  title: "Overcookied",
   description: "A fun idle game built with Next.js and Go",
 };
 
