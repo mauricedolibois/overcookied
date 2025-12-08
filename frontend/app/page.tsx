@@ -1,22 +1,29 @@
+'use client';
+
+import { useEffect } from 'react';
+import { useRouter } from 'next/navigation';
+
 export default function Home() {
+  const router = useRouter();
+
+  useEffect(() => {
+    // Check if user is logged in
+    const storedUser = localStorage.getItem('user');
+    if (storedUser) {
+      // User is logged in, redirect to dashboard
+      router.push('/dashboard');
+    } else {
+      // User is not logged in, redirect to login
+      router.push('/login');
+    }
+  }, [router]);
+
   return (
-    <div className="flex min-h-screen items-center justify-center bg-gradient-to-br from-amber-100 to-orange-200 dark:from-amber-900 dark:to-orange-950">
-      <main className="flex flex-col items-center gap-8 p-8">
-        <h1 className="text-6xl font-bold text-amber-900 dark:text-amber-100">
-          🍪 Cookie Clicker
-        </h1>
-        <p className="text-xl text-amber-800 dark:text-amber-200 text-center max-w-md">
-          Welcome to Cookie Clicker! A fun idle game built with Next.js and Go.
-        </p>
-        <div className="text-center">
-          <p className="text-gray-700 dark:text-gray-300 mb-2">
-            Frontend: Next.js {process.env.npm_package_dependencies_next || '16.0.3'}
-          </p>
-          <p className="text-gray-700 dark:text-gray-300">
-            Backend: Go HTTP Server
-          </p>
-        </div>
-      </main>
+    <div className="flex min-h-screen items-center justify-center bg-gradient-to-br from-[#FFE082] to-[#FFD54F]">
+      <div className="text-center">
+        <div className="inline-block animate-spin rounded-full h-16 w-16 border-4 border-[#FF6B4A] border-t-transparent"></div>
+        <p className="mt-4 text-2xl text-[#5D4037] font-extrabold" style={{fontFamily: 'Nunito'}}>Loading...</p>
+      </div>
     </div>
   );
 }
