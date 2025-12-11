@@ -62,7 +62,10 @@ export default function CookieBackground() {
               alt=""
               width={80}
               height={80}
-              className="opacity-30"
+              className="opacity-40"
+              style={{
+                filter: 'brightness(0) saturate(100%) invert(85%) sepia(20%) saturate(840%) hue-rotate(358deg) brightness(103%) contrast(95%)',
+              }}
             />
           </div>
         ))}
