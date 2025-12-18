@@ -1,9 +1,11 @@
 'use client';
 
 interface User {
-  username: string;
-  id: number;
-  avatar: string;
+  id: string;
+  email: string;
+  name: string;
+  picture: string;
+  token?: string;
 }
 
 interface ProfileProps {
@@ -17,18 +19,24 @@ export default function Profile({ user, onLogout }: ProfileProps) {
       <div className="flex items-center justify-between">
         <div className="flex items-center space-x-4">
           {/* Avatar */}
-          <div className="w-20 h-20 rounded-full bg-gradient-to-br from-[#f6e58d] to-[#f9ca24] flex items-center justify-center text-4xl shadow-sm">
-            {user.avatar}
+          <div className="w-20 h-20 rounded-full overflow-hidden bg-gradient-to-br from-[#f6e58d] to-[#f9ca24] flex items-center justify-center shadow-sm">
+            {user.picture ? (
+              <img 
+                src={user.picture} 
+                alt={user.name}
+                className="w-full h-full object-cover"
+                referrerPolicy="no-referrer"
+              />
+            ) : (
+              <span className="text-4xl">🍪</span>
+            )}
           </div>
           
           {/* User Info */}
           <div>
             <h3 className="text-2xl font-extrabold text-gray-800">
-              {user.username}
+              {user.name}
             </h3>
-            <p className="text-gray-600 text-sm font-semibold">
-              Cookie Master
-            </p>
           </div>
         </div>
 

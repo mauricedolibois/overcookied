@@ -9,7 +9,7 @@ interface GameRecord {
 }
 
 interface GameHistoryProps {
-  userId: number;
+  userId: string | number;
 }
 
 export default function GameHistory({ userId }: GameHistoryProps) {

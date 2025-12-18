@@ -6,6 +6,8 @@ import (
 	"log"
 	"net/http"
 	"os"
+
+	"github.com/joho/godotenv"
 )
 
 // Response structure for API endpoints
@@ -35,6 +37,14 @@ func apiHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func main() {
+	// Load .env file
+	if err := godotenv.Load(); err != nil {
+		log.Println("Warning: No .env file found, using environment variables")
+	}
+
+	// Initialize OAuth
+	initOAuth()
+
 	// Get port from environment or use default
 	port := os.Getenv("PORT")
 	if port == "" {
@@ -44,6 +54,10 @@ func main() {
 	// Register handlers
 	http.HandleFunc("/health", healthHandler)
 	http.HandleFunc("/api", apiHandler)
+	http.HandleFunc("/auth/google/login", handleGoogleLogin)
+	http.HandleFunc("/auth/google/callback", handleGoogleCallback)
+	http.HandleFunc("/auth/verify", handleVerifySession)
+	http.HandleFunc("/auth/logout", handleLogout)
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		response := Response{

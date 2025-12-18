@@ -6,34 +6,42 @@ import Profile from '@/components/Profile';
 import GameHistory from '@/components/GameHistory';
 import Leaderboard from '@/components/Leaderboard';
 import CookieBackground from '@/components/CookieBackground';
-
-interface User {
-  username: string;
-  id: number;
-  avatar: string;
-}
+import { authService, UserSession } from '@/lib/auth';
 
 export default function DashboardPage() {
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  const [user, setUser] = useState<User | null>(() => {
-    if (typeof window !== 'undefined') {
-      const storedUser = localStorage.getItem('user');
-      return storedUser ? JSON.parse(storedUser) : null;
-    }
-    return null;
-  });
+  const [user, setUser] = useState<UserSession | null>(null);
+  const [loading, setLoading] = useState(true);
   const [sparkleActive, setSparkleActive] = useState(false);
   const router = useRouter();
 
   useEffect(() => {
-    // Check if user is logged in
-    if (!user) {
-      router.push('/login');
-    }
-  }, [router, user]);
+    // Check if user is logged in and verify session
+    const initAuth = async () => {
+      const currentUser = authService.getCurrentUser();
+      
+      if (!currentUser || !authService.isAuthenticated()) {
+        router.push('/login');
+        return;
+      }
 
-  const handleLogout = () => {
-    localStorage.removeItem('user');
+      // Verify session with backend
+      const verifiedUser = await authService.verifySession(currentUser.token);
+      if (verifiedUser) {
+        setUser(verifiedUser);
+      } else {
+        // Session invalid, redirect to login
+        authService.removeUser();
+        router.push('/login');
+      }
+      
+      setLoading(false);
+    };
+
+    initAuth();
+  }, [router]);
+
+  const handleLogout = async () => {
+    await authService.logout();
     router.push('/login');
   };
 
@@ -48,7 +56,7 @@ export default function DashboardPage() {
     }, 300);
   };
 
-  if (!user) {
+  if (loading || !user) {
     return (
       <div className="flex min-h-screen items-center justify-center">
         <div className="text-xl">Loading...</div>
