@@ -13,6 +13,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/mauricedolibois/overcookied/backend/db"
+
 	"github.com/golang-jwt/jwt/v5"
 	"golang.org/x/oauth2"
 	"golang.org/x/oauth2/google"
@@ -149,6 +151,20 @@ func handleGoogleCallback(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, fmt.Sprintf("%s/login?error=token_generation_failed", frontendURL), http.StatusTemporaryRedirect)
 		return
 	}
+
+	// PERSIST USER in DynamoDB
+	user := db.CookieUser{
+		UserID:  userInfo.ID,
+		Email:   userInfo.Email,
+		Name:    userInfo.Name,
+		Picture: userInfo.Picture,
+	}
+	if err := db.SaveUser(user); err != nil {
+		log.Printf("[AUTH] WARNING: Failed to save user to DB: %v", err)
+	} else {
+		log.Printf("[AUTH] User saved to DynamoDB: %s", userInfo.Email)
+	}
+
 	log.Printf("[AUTH] JWT token generated successfully for user: %s", userInfo.Email)
 
 	// Redirect to frontend with JWT token
@@ -239,20 +255,24 @@ func handleVerifySession(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 
 	// Enable CORS
-	frontendURL := os.Getenv("FRONTEND_URL")
-	if frontendURL == "" {
-		frontendURL = "http://localhost:3000"
+	origin := r.Header.Get("Origin")
+	if origin != "" {
+		w.Header().Set("Access-Control-Allow-Origin", origin)
+	} else {
+		w.Header().Set("Access-Control-Allow-Origin", "*")
 	}
-	w.Header().Set("Access-Control-Allow-Origin", frontendURL)
+
 	w.Header().Set("Access-Control-Allow-Credentials", "true")
-	w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
-	w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
+	w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS, PUT, DELETE")
+	w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Requested-With, Upgrade, Connection")
 
 	if r.Method == "OPTIONS" {
-		log.Printf("[AUTH] CORS preflight request handled")
+		log.Printf("[AUTH] CORS preflight request handled for Origin: %s", origin)
 		w.WriteHeader(http.StatusOK)
 		return
 	}
+
+	log.Printf("[AUTH] Processing verification request method: %s", r.Method)
 
 	tokenString := r.Header.Get("Authorization")
 	if tokenString == "" {

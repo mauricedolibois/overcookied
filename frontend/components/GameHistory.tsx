@@ -3,9 +3,17 @@
 import { useState, useEffect } from 'react';
 
 interface GameRecord {
-  id: number;
+  id: string;
   score: number;
-  cookies: number;
+  opponentScore: number;
+  won: boolean;
+  winnerId: string;
+  opponentId: string;
+  playerName?: string;
+  playerPicture?: string;
+  opponentName?: string;
+  opponentPicture?: string;
+  timestamp: number;
 }
 
 interface GameHistoryProps {
@@ -17,33 +25,37 @@ export default function GameHistory({ userId }: GameHistoryProps) {
   const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
-    // Simulate fetching game history - replace with actual API call
-    setTimeout(() => {
-      const mockGames: GameRecord[] = [
-        {
-          id: 1,
-          score: 15420,
-          cookies: 1542,
-        },
-        {
-          id: 2,
-          score: 23100,
-          cookies: 2310,
-        },
-        {
-          id: 3,
-          score: 8750,
-          cookies: 875,
-        },
-        {
-          id: 4,
-          score: 31500,
-          cookies: 3150,
-        },
-      ];
-      setGames(mockGames);
-      setIsLoading(false);
-    }, 500);
+    async function fetchHistory() {
+      if (!userId) return;
+      try {
+        const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/history?userId=${userId}`);
+        if (res.ok) {
+          const data = await res.json();
+          console.log("History Data:", data);
+          // API returns CookieGame: { gameId, score, cookies, won, reason, ... }
+          // API returns CookieGame with new fields
+          const mappedData = data.map((g: any) => ({
+            id: g.gameId,
+            score: g.score,
+            opponentScore: g.opponentScore,
+            won: g.won,
+            winnerId: g.winnerId,
+            opponentId: g.opponent,
+            playerName: g.playerName,
+            playerPicture: g.playerPicture,
+            opponentName: g.opponentName,
+            opponentPicture: g.opponentPicture,
+            timestamp: g.timestamp,
+          }));
+          setGames(mappedData);
+        }
+      } catch (error) {
+        console.error("Failed to fetch history", error);
+      } finally {
+        setIsLoading(false);
+      }
+    }
+    fetchHistory();
   }, [userId]);
 
   return (
@@ -65,37 +77,55 @@ export default function GameHistory({ userId }: GameHistoryProps) {
           <p className="text-sm mt-2">Start your first game to see your history here.</p>
         </div>
       ) : (
-        <div className="space-y-2 max-h-96 overflow-y-auto">
-          {games.map((game, index) => (
+        <div className="space-y-2 h-[600px] overflow-y-auto pr-2 custom-scrollbar">
+          {games.map((game) => (
             <div
               key={game.id}
-              className="flex items-center justify-between p-4 rounded-[16px] transition-all bg-[#FFF4E6] hover:bg-[#FFEB99] border-2 border-[#FFD93D]"
+              className={`flex flex-col rounded-[16px] border-2 transition-all overflow-hidden ${game.won
+                ? 'bg-[#FFFAE6] border-[#FFD93D] shadow-[0px_4px_0px_0px_#FFD93D]'
+                : 'bg-white border-gray-200 shadow-sm'
+                }`}
             >
-              <div className="flex items-center space-x-3 flex-1">
-                {/* Rank/Number */}
-                <div className="text-xl font-extrabold min-w-[3.5rem] text-gray-800">
-                  #{index + 1}
-                </div>
+              {/* ID & Date Header */}
+              <div className={`px-4 py-2 flex justify-between items-center text-xs font-bold uppercase tracking-wider ${game.won ? 'bg-[#FFD93D] text-gray-800' : 'bg-gray-100 text-gray-500'
+                }`}>
+                <span>{game.won ? '🏆 VICTORY' : 'DEFEAT'}</span>
+                <span>{new Date(game.timestamp * 1000).toLocaleDateString()}</span>
+              </div>
 
-                {/* Cookie Icon */}
-                <div className="text-2xl">
-                  🍪
-                </div>
-
-                {/* Game Info */}
-                <div className="flex-1 min-w-0">
-                  <div className="font-extrabold text-gray-800 truncate">
-                    {game.cookies.toLocaleString()} cookies
+              <div className="p-4 flex items-center justify-between">
+                {/* You */}
+                <div className="flex flex-col items-center flex-1">
+                  <img
+                    src={game.playerPicture || `https://api.dicebear.com/7.x/avataaars/svg?seed=${game.winnerId}`}
+                    alt="You"
+                    className="w-12 h-12 rounded-full border-2 border-white shadow-md mb-2"
+                  />
+                  <div className="text-sm font-bold text-gray-800 mb-1 max-w-[100px] truncate">
+                    {game.playerName || "You"}
                   </div>
-                </div>
-
-                {/* Score */}
-                <div className="text-right">
-                  <div className="font-extrabold text-gray-800 text-lg">
+                  <div className="text-2xl font-black text-gray-800">
                     {game.score.toLocaleString()}
                   </div>
-                  <div className="text-xs text-gray-600 font-bold">
-                    points
+                </div>
+
+                {/* VS */}
+                <div className="px-4">
+                  <div className="text-gray-300 font-black text-2xl italic">VS</div>
+                </div>
+
+                {/* Opponent */}
+                <div className="flex flex-col items-center flex-1">
+                  <img
+                    src={game.opponentPicture || `https://api.dicebear.com/7.x/avataaars/svg?seed=${game.opponentId}`}
+                    alt="Opponent"
+                    className="w-12 h-12 rounded-full border-2 border-white shadow-md mb-2 grayscale-[0.2]"
+                  />
+                  <div className="text-sm font-bold text-gray-600 mb-1 max-w-[100px] truncate">
+                    {game.opponentName || "Opponent"}
+                  </div>
+                  <div className="text-xl font-bold text-gray-500">
+                    {game.opponentScore.toLocaleString()}
                   </div>
                 </div>
               </div>
