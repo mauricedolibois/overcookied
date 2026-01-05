@@ -150,7 +150,7 @@ func (gm *GameManager) handleMessage(client *Client, msg []byte) {
 	switch genericMsg.Type {
 	case MsgTypeJoinQueue:
 		gm.handleJoinQueue(client)
-	case MsgTypeClick, MsgTypeCookieClick:
+	case MsgTypeClick, MsgTypeCookieClick, MsgTypeQuit:
 		if room, ok := gm.clientRooms[client]; ok {
 			room.HandleGameMessage(client, genericMsg)
 		}
@@ -181,7 +181,7 @@ func (gm *GameManager) StartGame(p1, p2 *Client) {
 			P2Name:        p2.userID,
 		},
 		Broadcast:         make(chan []byte),
-		Close:             make(chan bool),
+		Close:             make(chan bool, 1),
 		DoubleClickActive: make(map[string]time.Time),
 	}
 
@@ -206,6 +206,12 @@ func (gm *GameManager) StartGame(p1, p2 *Client) {
 // I will add a map to GameManager for this purpose.
 
 func (room *GameRoom) Run() {
+	// Broadcast initial state so clients know game is starting (and see initial time)
+	room.broadcastState()
+
+	// Wait for countdown (5 seconds)
+	time.Sleep(5 * time.Second)
+
 	ticker := time.NewTicker(1 * time.Second)
 	// Golden cookie ticker (random interval 20-40s)
 	gcTimer := time.NewTimer(time.Duration(20+rand.Intn(21)) * time.Second)
@@ -220,8 +226,12 @@ func (room *GameRoom) Run() {
 		case <-room.Close:
 			return
 		case <-ticker.C:
+			room.mutex.Lock()
 			room.State.TimeRemaining--
-			if room.State.TimeRemaining <= 0 {
+			timeUp := room.State.TimeRemaining <= 0
+			room.mutex.Unlock()
+
+			if timeUp {
 				room.EndGame()
 				return
 			}
@@ -234,10 +244,21 @@ func (room *GameRoom) Run() {
 }
 
 func (room *GameRoom) broadcastState() {
+	room.mutex.Lock()
+	defer room.mutex.Unlock()
+
 	msg := GameMessage{Type: MsgTypeUpdate, Payload: room.State}
 	bytes, _ := json.Marshal(msg)
-	room.Player1.send <- bytes
-	room.Player2.send <- bytes
+
+	// Non-blocking send to avoid hanging if client is stuck
+	select {
+	case room.Player1.send <- bytes:
+	default:
+	}
+	select {
+	case room.Player2.send <- bytes:
+	default:
+	}
 }
 
 func (room *GameRoom) SpawnGoldenCookie() {
@@ -364,6 +385,7 @@ func (room *GameRoom) HandleGameMessage(client *Client, msg GameMessage) {
 		}
 
 	case MsgTypeQuit:
+		log.Printf("Processing QUIT_GAME from user: %s", client.userID)
 		// Client requested to quit
 		// Treat as "Resigned" -> Opponent wins or just Game Over
 		otherPlayer := room.Player1
@@ -374,14 +396,22 @@ func (room *GameRoom) HandleGameMessage(client *Client, msg GameMessage) {
 		// Send Game Over
 		msg := GameMessage{
 			Type:    MsgTypeGameOver,
-			Payload: map[string]string{"winner": otherPlayer.userID, "reason": "opponent_quit"},
+			Payload: map[string]string{"winner": otherPlayer.userID, "reason": "quit"},
 		}
 		bytes, _ := json.Marshal(msg)
-		room.Player1.send <- bytes
-		room.Player2.send <- bytes
+
+		// Non-blocking sends
+		select {
+		case room.Player1.send <- bytes:
+		default:
+		}
+		select {
+		case room.Player2.send <- bytes:
+		default:
+		}
 
 		// DO NOT PERSIST if game is aborted/quit
-		log.Printf("Game %s aborted by %s, stats NOT saved.", room.ID, client.userID)
+		log.Printf("Game %s aborted by %s, stats NOT saved. Closing room.", room.ID, client.userID)
 
 		room.Close <- true
 	}

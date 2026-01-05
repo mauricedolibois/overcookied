@@ -81,11 +81,24 @@ export default function Leaderboard() {
                 </div>
 
                 {/* Avatar */}
-                <div className="text-2xl">
+                <div className="text-2xl flex-shrink-0">
                   {entry.avatar && entry.avatar.startsWith('http') ? (
-                    <img src={entry.avatar} alt="avatar" className="w-8 h-8 rounded-full" />
+                    <img
+                      src={entry.avatar}
+                      alt={entry.username}
+                      className="w-8 h-8 rounded-full object-cover"
+                      referrerPolicy="no-referrer"
+                      onError={(e) => {
+                        const target = e.target as HTMLImageElement;
+                        target.style.display = 'none';
+                        const parent = target.parentElement;
+                        if (parent) {
+                          parent.innerHTML = '🍪';
+                        }
+                      }}
+                    />
                   ) : (
-                    entry.avatar || '🍪'
+                    <span>{entry.avatar || '🍪'}</span>
                   )}
                 </div>
 
@@ -102,7 +115,7 @@ export default function Leaderboard() {
                     {entry.score.toLocaleString()}
                   </div>
                   <div className="text-xs text-gray-600 font-bold">
-                    total cookies
+                    Total Cookies
                   </div>
                 </div>
               </div>

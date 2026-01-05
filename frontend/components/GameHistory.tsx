@@ -81,15 +81,21 @@ export default function GameHistory({ userId }: GameHistoryProps) {
           {games.map((game) => (
             <div
               key={game.id}
-              className={`flex flex-col rounded-[16px] border-2 transition-all overflow-hidden ${game.won
-                ? 'bg-[#FFFAE6] border-[#FFD93D] shadow-[0px_4px_0px_0px_#FFD93D]'
-                : 'bg-white border-gray-200 shadow-sm'
+              className={`flex flex-col rounded-[16px] border-2 transition-all overflow-hidden ${game.winnerId === 'draw'
+                ? 'bg-gray-50 border-gray-400 shadow-[0px_4px_0px_0px_#9CA3AF]'
+                : game.won
+                  ? 'bg-[#FFFAE6] border-[#FFD93D] shadow-[0px_4px_0px_0px_#FFD93D]'
+                  : 'bg-white border-gray-200 shadow-sm'
                 }`}
             >
               {/* ID & Date Header */}
-              <div className={`px-4 py-2 flex justify-between items-center text-xs font-bold uppercase tracking-wider ${game.won ? 'bg-[#FFD93D] text-gray-800' : 'bg-gray-100 text-gray-500'
+              <div className={`px-4 py-2 flex justify-between items-center text-xs font-bold uppercase tracking-wider ${game.winnerId === 'draw'
+                ? 'bg-gray-200 text-gray-700'
+                : game.won
+                  ? 'bg-[#FFD93D] text-gray-800'
+                  : 'bg-gray-100 text-gray-500'
                 }`}>
-                <span>{game.won ? '🏆 VICTORY' : 'DEFEAT'}</span>
+                <span>{game.winnerId === 'draw' ? '🤝 DRAW' : game.won ? '🏆 VICTORY' : '😔 DEFEAT'}</span>
                 <span>{new Date(game.timestamp * 1000).toLocaleDateString()}</span>
               </div>
 

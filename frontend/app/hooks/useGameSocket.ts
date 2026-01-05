@@ -94,7 +94,13 @@ export const useGameSocket = (user: UserSession | null) => {
                 break;
             case 'GAME_OVER':
                 setGameStatus('FINISHED');
-                setGameState((prev) => prev ? ({ ...prev, winner: msg.payload.winner, reason: msg.payload.reason }) : null);
+                setGameState((prev) => {
+                    // Prevent overwriting if we already have a winner (game finished)
+                    if (prev?.winner) {
+                        return prev;
+                    }
+                    return prev ? ({ ...prev, winner: msg.payload.winner, reason: msg.payload.reason }) : null;
+                });
                 break;
         }
     };

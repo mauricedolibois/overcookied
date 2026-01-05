@@ -4,6 +4,7 @@ import { useEffect, useState, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { useGameSocket, GameState } from '../hooks/useGameSocket';
 import { authService, UserSession } from '@/lib/auth';
+import CookieBackground from '@/components/CookieBackground';
 
 type Particle = {
   id: number;
@@ -115,14 +116,14 @@ export default function GamePage() {
 
       {/* MATCHMAKING SCREEN */}
       {gameStatus === 'MATCHMAKING' && (
-        <div className="absolute inset-0 flex flex-col items-center justify-center z-50 bg-black/40 backdrop-blur-sm">
-          <div className="bg-white p-10 rounded-2xl shadow-2xl text-center">
-            <div className="text-6xl animate-bounce mb-4">🍪</div>
-            <h2 className="text-3xl font-bold text-gray-800 mb-2">Finding Opponent...</h2>
-            <p className="text-gray-600 mb-6">Prepare your fingers!</p>
+        <div className="absolute inset-0 flex flex-col items-center justify-center z-50 bg-white">
+          <CookieBackground />
+          <div className="relative z-10 flex flex-col items-center">
+            <div className="text-9xl animate-spin-slow mb-8">🍪</div>
+            <h2 className="text-4xl font-extrabold text-gray-800 mb-4">Finding Opponent...</h2>
             <button
               onClick={() => router.push('/dashboard')}
-              className="px-6 py-2 bg-gray-200 hover:bg-gray-300 rounded-full font-bold text-gray-700 transition"
+              className="mt-4 px-12 py-4 bg-[#f6e58d] hover:bg-[#f9ca24] text-black font-extrabold rounded-[24px] shadow-[0_8px_0_0_#f9ca24] hover:shadow-[0_8px_0_0_#f0932b] active:shadow-[0_2px_0_0_#f0932b] active:translate-y-[6px] transition-all duration-75 text-lg"
             >
               Cancel Search
             </button>
@@ -132,34 +133,74 @@ export default function GamePage() {
 
       {/* GAME OVER SCREEN */}
       {gameStatus === 'FINISHED' && gameState && (
-        <div className="absolute inset-0 flex flex-col items-center justify-center z-50 bg-black/60 backdrop-blur-md">
-          <div className="bg-white p-12 rounded-3xl shadow-2xl text-center border-4 border-[#FFD54F]">
-            <h2 className="text-5xl font-extrabold text-[#FF6B4A] mb-4">
-              {gameState.reason === 'opponent_disconnected' || gameState.reason === 'opponent_quit' ? 'OPPONENT LEFT' : (gameState.winner === user.id ? 'VICTORY!' : 'DEFEAT')}
-            </h2>
+        <div className="absolute inset-0 flex flex-col items-center justify-center z-50 bg-black/70 backdrop-blur-md">
+          <div className={`relative z-10 p-12 rounded-[32px] shadow-2xl text-center max-w-2xl ${gameState.winner === user.id
+            ? 'bg-white border-4 border-[#f6e58d]'
+            : 'bg-white border-4 border-gray-300'
+            }`}>
+            {/* Victory/Defeat Header */}
+            <div className="mb-6">
+              {gameState.reason === 'quit' ? (
+                gameState.winner === user.id ? (
+                  <>
+                    <div className="text-7xl mb-4">👋</div>
+                    <h2 className="text-5xl font-extrabold text-gray-700 mb-2">OPPONENT LEFT</h2>
+                    <p className="text-xl text-gray-600 font-bold">The opponent has fled the kitchen!</p>
+                  </>
+                ) : (
+                  <>
+                    <div className="text-7xl mb-4">🏳️</div>
+                    <h2 className="text-5xl font-extrabold text-gray-700 mb-2">YOU GAVE UP</h2>
+                    <p className="text-xl text-gray-600 font-bold">You abandoned the kitchen!</p>
+                  </>
+                )
+              ) : gameState.winner === 'draw' ? (
+                <>
+                  <div className="text-8xl mb-4">🤝</div>
+                  <h2 className="text-6xl font-extrabold text-gray-700 mb-2">It&apos;s a draw!</h2>
+                </>
+              ) : gameState.winner === user.id ? (
+                <>
+                  <div className="text-8xl mb-4">🏆</div>
+                  <h2 className="text-6xl font-extrabold text-transparent bg-clip-text bg-gradient-to-r from-[#FF6B4A] to-[#FF8C00] mb-2">
+                    VICTORY!
+                  </h2>
+                  <p className="text-2xl font-bold text-gray-800">You are the Cookie Champion! 🍪</p>
+                </>
+              ) : (
+                <>
+                  <div className="text-7xl mb-4">😔</div>
+                  <h2 className="text-5xl font-extrabold text-gray-700 mb-2">DEFEAT</h2>
+                  <p className="text-xl text-gray-600 font-bold">Better luck next time!</p>
+                </>
+              )}
+            </div>
 
-            {(gameState.reason === 'opponent_disconnected' || gameState.reason === 'opponent_quit') && (
-              <p className="text-xl text-gray-600 mb-6 font-bold">The opponent has fled the kitchen!</p>
-            )}
-
-            <div className="flex gap-8 justify-center mb-8 text-xl">
+            {/* Score Display */}
+            <div className="flex gap-12 justify-center mb-10 text-xl">
               <div className="flex flex-col items-center">
-                <span className="font-bold text-gray-500">You</span>
-                <span className="text-4xl font-black text-[#FF6B4A]">{gameState.p1Name === user.id ? gameState.p1Score : gameState.p2Score}</span>
+                <span className="font-bold text-gray-600 uppercase tracking-wider mb-2">You</span>
+                <div className={`text-6xl font-black ${gameState.winner === user.id ? 'text-[#FF6B4A]' : 'text-gray-700'}`}>
+                  {gameState.p1Name === user.id ? gameState.p1Score : gameState.p2Score}
+                </div>
               </div>
               <div className="flex flex-col items-center justify-center">
-                <span className="text-2xl font-bold text-gray-300">VS</span>
+                <span className="text-4xl font-bold text-gray-400">VS</span>
               </div>
               <div className="flex flex-col items-center">
-                <span className="font-bold text-gray-500">Opponent</span>
-                <span className="text-4xl font-black text-gray-600">{gameState.p1Name === user.id ? gameState.p2Score : gameState.p1Score}</span>
+                <span className="font-bold text-gray-600 uppercase tracking-wider mb-2">Opponent</span>
+                <div className="text-6xl font-black text-gray-500">
+                  {gameState.p1Name === user.id ? gameState.p2Score : gameState.p1Score}
+                </div>
               </div>
             </div>
+
+            {/* Back Button */}
             <button
               onClick={() => router.push('/dashboard')}
-              className="px-8 py-3 bg-[#FF6B4A] text-white rounded-full font-bold text-lg hover:bg-[#ff8c73] transition shadow-lg"
+              className="px-16 py-5 bg-[#f6e58d] hover:bg-[#f9ca24] text-black font-extrabold rounded-[24px] shadow-[0_10px_0_0_#f9ca24] hover:shadow-[0_10px_0_0_#f0932b] active:shadow-[0_2px_0_0_#f0932b] active:translate-y-[8px] transition-all duration-75 text-xl"
             >
-              Back to Dashboard
+              Back to Menu
             </button>
           </div>
         </div>
@@ -301,6 +342,13 @@ export default function GamePage() {
         }
         .animate-fly {
           animation-name: fly;
+        }
+        @keyframes spin-slow {
+          from { transform: rotate(0deg); }
+          to { transform: rotate(360deg); }
+        }
+        .animate-spin-slow {
+          animation: spin-slow 2s linear infinite;
         }
         .text-shadow-blue {
           text-shadow: 0 2px 4px rgba(59, 130, 246, 0.5);
