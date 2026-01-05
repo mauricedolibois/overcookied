@@ -176,7 +176,7 @@ func (gm *GameManager) StartGame(p1, p2 *Client) {
 		Player1: p1,
 		Player2: p2,
 		State: GameState{
-			TimeRemaining: 10,        // 10 seconds (for testing)
+			TimeRemaining: 120,       // 2 minutes
 			P1Name:        p1.userID, // Replace with real name later
 			P2Name:        p2.userID,
 		},

@@ -145,13 +145,11 @@ export default function GamePage() {
                   <>
                     <div className="text-7xl mb-4">👋</div>
                     <h2 className="text-5xl font-extrabold text-gray-700 mb-2">OPPONENT LEFT</h2>
-                    <p className="text-xl text-gray-600 font-bold">The opponent has fled the kitchen!</p>
                   </>
                 ) : (
                   <>
                     <div className="text-7xl mb-4">🏳️</div>
                     <h2 className="text-5xl font-extrabold text-gray-700 mb-2">YOU GAVE UP</h2>
-                    <p className="text-xl text-gray-600 font-bold">You abandoned the kitchen!</p>
                   </>
                 )
               ) : gameState.winner === 'draw' ? (
@@ -219,12 +217,12 @@ export default function GamePage() {
             </div>
 
             <div className="flex flex-col items-center w-1/3">
-              <div className="bg-gray-800 text-white px-6 py-2 rounded-full font-mono text-xl shadow-inner mb-2">
+              <div className="bg-gray-800 text-white px-6 py-2 rounded-full font-mono text-xl shadow-inner mb-2 border-2 border-gray-600">
                 {formatTime(gameState.timeRemaining)}
               </div>
               <button
                 onClick={quitGame}
-                className="text-xs text-red-500 hover:text-red-700 font-bold underline cursor-pointer"
+                className="mt-1 px-4 py-1 bg-red-100 hover:bg-red-200 text-red-600 hover:text-red-700 font-bold rounded-lg text-sm transition-colors border border-red-200"
               >
                 QUIT GAME
               </button>
@@ -238,11 +236,11 @@ export default function GamePage() {
             </div>
           </div>
 
-          {/* POWER UP TIMER */}
+          {/* POWER UP TIMER - Just below header */}
           {powerUpExpiresAt && (
-            <div className="absolute top-24 left-1/2 transform -translate-x-1/2 w-64 h-2 bg-gray-200 rounded-full overflow-hidden border border-white/50 shadow-lg z-30">
+            <div className="absolute top-42 left-1/2 transform -translate-x-1/2 w-80 h-4 bg-gray-200 rounded-full overflow-hidden border-2 border-white shadow-xl z-30">
               <div
-                className="h-full bg-gradient-to-r from-yellow-400 to-yellow-600 animate-drain"
+                className="h-full bg-gradient-to-r from-[#FFD700] to-[#FFA000] animate-drain shadow-[0_0_10px_rgba(255,215,0,0.5)]"
                 style={{ width: '100%' }}
               ></div>
             </div>
