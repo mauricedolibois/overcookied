@@ -1,0 +1,82 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: overcookied-backend
+  namespace: overcookied
+  labels:
+    app: overcookied-backend
+    component: api
+    version: v1
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: overcookied-backend
+  template:
+    metadata:
+      labels:
+        app: overcookied-backend
+        component: api
+        version: v1
+    spec:
+      serviceAccountName: backend-sa
+      containers:
+      - name: backend
+        image: 032073356456.dkr.ecr.eu-central-1.amazonaws.com/overcookied-backend:latest
+        imagePullPolicy: Always
+        ports:
+        - containerPort: 8080
+          name: http
+          protocol: TCP
+        env:
+        - name: PORT
+          value: "8080"
+        - name: AWS_REGION
+          value: "eu-central-1"
+        - name: DYNAMODB_TABLE_USERS
+          value: "CookieUsers"
+        - name: DYNAMODB_TABLE_GAMES
+          value: "CookieGames"
+        # Google OAuth credentials from Secrets Manager
+        # Application will fetch via AWS SDK using IRSA
+        - name: GOOGLE_OAUTH_SECRET_NAME
+          value: "overcookied/google-oauth"
+        # OAuth redirect URL - set after ALB is provisioned
+        - name: GOOGLE_REDIRECT_URL
+          valueFrom:
+            configMapKeyRef:
+              name: oauth-config
+              key: GOOGLE_REDIRECT_URL
+        # Frontend URL for redirects after login
+        - name: FRONTEND_URL
+          valueFrom:
+            configMapKeyRef:
+              name: oauth-config
+              key: FRONTEND_URL
+        # Session secret (optional, can also be from Secrets Manager)
+        - name: SESSION_SECRET
+          value: "changeme-use-secrets-manager-in-production"
+        resources:
+          requests:
+            cpu: 100m
+            memory: 128Mi
+          limits:
+            cpu: 500m
+            memory: 512Mi
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8080
+          initialDelaySeconds: 10
+          periodSeconds: 10
+          timeoutSeconds: 3
+          failureThreshold: 3
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 8080
+          initialDelaySeconds: 5
+          periodSeconds: 5
+          timeoutSeconds: 3
+          failureThreshold: 3
+      terminationGracePeriodSeconds: 30

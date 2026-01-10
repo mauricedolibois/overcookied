@@ -1,7 +1,24 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { UserSession } from '@/lib/auth';
 
-const WS_URL = process.env.NEXT_PUBLIC_WS_URL || 'ws://localhost:8080/ws';
+// Get the WebSocket URL dynamically
+const getWsUrl = () => {
+    if (typeof window === 'undefined') {
+        return process.env.NEXT_PUBLIC_WS_URL || 'ws://localhost:8080/ws';
+    }
+    const envUrl = process.env.NEXT_PUBLIC_WS_URL;
+    if (envUrl && envUrl !== '') {
+        return envUrl;
+    }
+    // In production, derive WS URL from current host
+    if (window.location.hostname !== 'localhost') {
+        const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+        return `${protocol}//${window.location.host}/ws`;
+    }
+    return 'ws://localhost:8080/ws';
+};
+
+const WS_URL = getWsUrl();
 
 export type GameState = {
     timeRemaining: number;

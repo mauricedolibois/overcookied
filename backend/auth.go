@@ -13,6 +13,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/aws/aws-sdk-go-v2/config"
+	"github.com/aws/aws-sdk-go-v2/service/secretsmanager"
 	"github.com/mauricedolibois/overcookied/backend/db"
 
 	"github.com/golang-jwt/jwt/v5"
@@ -53,17 +55,66 @@ type GoogleUserInfo struct {
 	Locale        string `json:"locale"`
 }
 
+// OAuthSecrets represents the structure of OAuth credentials stored in AWS Secrets Manager
+type OAuthSecrets struct {
+	ClientID     string `json:"client_id"`
+	ClientSecret string `json:"client_secret"`
+}
+
+// fetchOAuthFromSecretsManager fetches OAuth credentials from AWS Secrets Manager
+func fetchOAuthFromSecretsManager() (clientID, clientSecret string, err error) {
+	secretName := os.Getenv("GOOGLE_OAUTH_SECRET_NAME")
+	if secretName == "" {
+		return "", "", fmt.Errorf("GOOGLE_OAUTH_SECRET_NAME not set")
+	}
+
+	log.Printf("[AUTH] Fetching OAuth credentials from AWS Secrets Manager: %s", secretName)
+
+	cfg, err := config.LoadDefaultConfig(context.Background())
+	if err != nil {
+		return "", "", fmt.Errorf("failed to load AWS config: %w", err)
+	}
+
+	client := secretsmanager.NewFromConfig(cfg)
+	input := &secretsmanager.GetSecretValueInput{
+		SecretId: &secretName,
+	}
+
+	result, err := client.GetSecretValue(context.Background(), input)
+	if err != nil {
+		return "", "", fmt.Errorf("failed to get secret: %w", err)
+	}
+
+	var secrets OAuthSecrets
+	if err := json.Unmarshal([]byte(*result.SecretString), &secrets); err != nil {
+		return "", "", fmt.Errorf("failed to parse secret: %w", err)
+	}
+
+	log.Printf("[AUTH] Successfully fetched OAuth credentials from Secrets Manager")
+	return secrets.ClientID, secrets.ClientSecret, nil
+}
+
 func initOAuth() {
 	clientID := os.Getenv("GOOGLE_CLIENT_ID")
 	clientSecret := os.Getenv("GOOGLE_CLIENT_SECRET")
 	redirectURL := os.Getenv("GOOGLE_REDIRECT_URL")
 
-	// Validate required OAuth credentials
-	if clientID == "" || clientID == "your_google_client_id_here" {
-		log.Fatal("ERROR: GOOGLE_CLIENT_ID is not set or is still using placeholder value. Please set it in your .env file.")
+	// If credentials not in env vars, try AWS Secrets Manager
+	if clientID == "" || clientID == "your_google_client_id_here" || clientSecret == "" || clientSecret == "your_google_client_secret_here" {
+		log.Println("[AUTH] OAuth credentials not found in environment variables, trying AWS Secrets Manager...")
+		var err error
+		clientID, clientSecret, err = fetchOAuthFromSecretsManager()
+		if err != nil {
+			log.Fatalf("ERROR: Failed to fetch OAuth credentials from Secrets Manager: %v. Please set GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET environment variables or configure AWS Secrets Manager.", err)
+		}
 	}
-	if clientSecret == "" || clientSecret == "your_google_client_secret_here" {
-		log.Fatal("ERROR: GOOGLE_CLIENT_SECRET is not set or is still using placeholder value. Please set it in your .env file.")
+
+	// Validate required OAuth credentials
+	if clientID == "" {
+		log.Fatal("ERROR: GOOGLE_CLIENT_ID is not set or is still using placeholder value.")
+	}
+	if clientSecret == "" {
+		log.Fatal("ERROR: GOOGLE_CLIENT_SECRET is not set or is still using placeholder value.")
 	}
 
 	if redirectURL == "" {

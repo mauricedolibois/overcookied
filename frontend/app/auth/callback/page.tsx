@@ -1,10 +1,10 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { authService } from '@/lib/auth';
 
-export default function AuthCallbackPage() {
+function AuthCallbackContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const [error, setError] = useState<string | null>(null);
@@ -12,7 +12,7 @@ export default function AuthCallbackPage() {
   useEffect(() => {
     const handleCallback = async () => {
       const token = searchParams.get('token');
-      
+
       if (!token) {
         setError('No authentication token received');
         setTimeout(() => router.push('/login'), 2000);
@@ -21,7 +21,7 @@ export default function AuthCallbackPage() {
 
       // Verify the session with the backend
       const user = await authService.verifySession(token);
-      
+
       if (user) {
         authService.saveUser(user);
         router.push('/dashboard');
@@ -57,5 +57,20 @@ export default function AuthCallbackPage() {
         )}
       </div>
     </div>
+  );
+}
+
+export default function AuthCallbackPage() {
+  return (
+    <Suspense fallback={
+      <div className="flex min-h-screen items-center justify-center bg-gray-50">
+        <div className="text-center">
+          <div className="text-6xl mb-4 animate-spin">🍪</div>
+          <h2 className="text-2xl font-bold text-gray-800 mb-2">Loading...</h2>
+        </div>
+      </div>
+    }>
+      <AuthCallbackContent />
+    </Suspense>
   );
 }

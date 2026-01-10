@@ -1,0 +1,10 @@
+aws_region          = "eu-central-1"
+project_name        = "overcookied"
+environment         = "prod"
+cluster_version     = "1.31"
+node_instance_types = ["t3.small"]
+node_desired_size   = 2
+node_min_size       = 1
+node_max_size       = 4
+dynamodb_table_users = "CookieUsers"
+dynamodb_table_games = "CookieGames"

@@ -1,0 +1,16 @@
+# OAuth Configuration ConfigMap
+# This ConfigMap holds URLs that change when the ALB is recreated
+# Update this after deploying the ingress to set the correct URLs
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: oauth-config
+  namespace: overcookied
+  labels:
+    app: overcookied
+    component: config
+data:
+  # Format: http://<ALB_HOSTNAME>/auth/google/callback
+  GOOGLE_REDIRECT_URL: "http://k8s-overcook-overcook-4c03cb3f56-1082818309.eu-central-1.elb.amazonaws.com/auth/google/callback"
+  # Format: http://<ALB_HOSTNAME>
+  FRONTEND_URL: "http://k8s-overcook-overcook-4c03cb3f56-1082818309.eu-central-1.elb.amazonaws.com"

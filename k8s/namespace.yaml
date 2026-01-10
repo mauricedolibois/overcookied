@@ -1,0 +1,7 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: overcookied
+  labels:
+    app.kubernetes.io/name: overcookied
+    app.kubernetes.io/managed-by: terraform

@@ -38,9 +38,11 @@ func Init() {
 	}
 	log.Printf("DIAGNOSTIC: Region: %s", cfg.Region)
 
+	// Note: ListTables is optional diagnostic info, don't fail if not permitted
 	tables, err := svc.ListTables(context.TODO(), &dynamodb.ListTablesInput{})
 	if err != nil {
-		log.Printf("DIAGNOSTIC ERROR: Could not list tables: %v", err)
+		log.Printf("DIAGNOSTIC: Could not list tables (permission may be restricted): %v", err)
+	} else {
 		log.Printf("DIAGNOSTIC: Found Tables: %v", tables.TableNames)
 	}
 }

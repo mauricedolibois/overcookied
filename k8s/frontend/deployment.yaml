@@ -1,0 +1,60 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: overcookied-frontend
+  namespace: overcookied
+  labels:
+    app: overcookied-frontend
+    component: web
+    version: v1
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: overcookied-frontend
+  template:
+    metadata:
+      labels:
+        app: overcookied-frontend
+        component: web
+        version: v1
+    spec:
+      containers:
+      - name: frontend
+        image: 032073356456.dkr.ecr.eu-central-1.amazonaws.com/overcookied-frontend:latest
+        imagePullPolicy: Always
+        ports:
+        - containerPort: 3000
+          name: http
+          protocol: TCP
+        env:
+        # Next.js environment variables
+        - name: NODE_ENV
+          value: "production"
+        # Backend URL will be relative (same ALB)
+        - name: NEXT_PUBLIC_API_URL
+          value: ""
+        resources:
+          requests:
+            cpu: 100m
+            memory: 256Mi
+          limits:
+            cpu: 500m
+            memory: 512Mi
+        livenessProbe:
+          httpGet:
+            path: /
+            port: 3000
+          initialDelaySeconds: 15
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3
+        readinessProbe:
+          httpGet:
+            path: /
+            port: 3000
+          initialDelaySeconds: 10
+          periodSeconds: 5
+          timeoutSeconds: 5
+          failureThreshold: 3
+      terminationGracePeriodSeconds: 30
