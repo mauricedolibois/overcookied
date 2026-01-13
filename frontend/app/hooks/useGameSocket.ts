@@ -1,24 +1,13 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { UserSession } from '@/lib/auth';
 
-// Get the WebSocket URL dynamically
-const getWsUrl = () => {
-    if (typeof window === 'undefined') {
-        return process.env.NEXT_PUBLIC_WS_URL || 'ws://localhost:8080/ws';
-    }
-    const envUrl = process.env.NEXT_PUBLIC_WS_URL;
-    if (envUrl && envUrl !== '') {
-        return envUrl;
-    }
-    // In production, derive WS URL from current host
-    if (window.location.hostname !== 'localhost') {
-        const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-        return `${protocol}//${window.location.host}/ws`;
-    }
-    return 'ws://localhost:8080/ws';
+// WebSocket URL is computed at connection time to avoid build-time evaluation
+// This ensures the URL is based on the actual browser location
+const getWsUrl = (): string => {
+    // Derive WebSocket URL from current browser location
+    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    return `${protocol}//${window.location.host}/ws`;
 };
-
-const WS_URL = getWsUrl();
 
 export type GameState = {
     timeRemaining: number;
@@ -48,7 +37,8 @@ export const useGameSocket = (user: UserSession | null) => {
     const connect = useCallback(() => {
         if (!user) return;
 
-        const ws = new WebSocket(`${WS_URL}?userId=${user.id}`);
+        const wsUrl = getWsUrl();
+        const ws = new WebSocket(`${wsUrl}?userId=${user.id}`);
 
         ws.onopen = () => {
             console.log('Connected to Game Server');

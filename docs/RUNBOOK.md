@@ -203,29 +203,71 @@ aws-load-balancer-controller   1/1     1            1           5m
 
 ## 🚀 Phase 4: Deploy Application zu Kubernetes
 
-### Option A: Automatisches Deployment (Empfohlen)
+### Option A: Automatisches Deployment
+
+#### Schritt 1: Application deployen
 
 ```powershell
-cd ..\..
+cd C:\Users\mauri\Local Docs\overcookied
 .\scripts\deploy-app.ps1
 ```
 
 **Das Script führt aus:**
 1. Account ID in Manifests ersetzen
 2. Namespace erstellen
-3. Backend deployen (ServiceAccount, Deployment, Service)
-4. Frontend deployen
-5. ALB Ingress erstellen
-6. Auf Pods warten
-7. Auf ALB warten (~3-5 Min)
-8. Health Check testen
-9. Browser öffnen
+3. JWT Secret erstellen (aus AWS Secrets Manager falls vorhanden)
+4. Backend deployen (ServiceAccount, Deployment, Service)
+5. Frontend deployen
+6. ALB Ingress erstellen
+7. Auf Pods warten
+8. Auf ALB warten (~3-5 Min)
+9. Health Check testen
+10. Browser öffnen
 
 **Dauer:** ~5-8 Minuten
+
+#### Schritt 2: Route 53 DNS und OAuth für Custom Domain konfigurieren
+
+```powershell
+.\scripts\update-oauth-config.ps1 -UpdateDNS -RestartBackend
+```
+
+**Das Script führt aus:**
+1. ALB hostname ermitteln
+2. Route 53 A-Record für `overcookied.de` → neuer ALB
+3. OAuth ConfigMap mit `https://overcookied.de` URLs updaten
+4. Backend Pods neu starten
+
+#### Schritt 3: Deployment verifizieren
+
+```powershell
+# DNS prüfen (via Google DNS bei lokalen Problemen)
+nslookup overcookied.de 8.8.8.8
+
+# Health Check
+curl https://overcookied.de/health --resolve overcookied.de:443:$(nslookup overcookied.de 8.8.8.8 | Select-String "Address" | Select-Object -Last 1).ToString().Split(" ")[-1]
+```
+
+#### Schritt 4: Im Browser öffnen
+
+```powershell
+Start-Process "https://overcookied.de"
+```
+
+**Checkliste:**
+- [ ] HTTPS funktioniert (🔒 Schloss-Symbol)
+- [ ] Login mit Google funktioniert
+- [ ] Redirect nach Login auf Dashboard
+
+> [!NOTE]
+> Bei DNS-Problemen: `ipconfig /flushdns` oder DNS auf 8.8.8.8 ändern.
 
 ---
 
 ### Option B: Manuelles Deployment (Step-by-Step)
+
+<details>
+<summary>📖 Manuelle Schritte anzeigen (für Debugging)</summary>
 
 #### Schritt 1: Account ID ersetzen
 
@@ -289,35 +331,72 @@ kubectl get ingress -n overcookied -w
 
 Drücke `Ctrl+C` zum Beenden.
 
+#### Schritt 8: Route 53 und OAuth konfigurieren
+
+Siehe [Option A Schritt 2](#schritt-2-route-53-dns-und-oauth-für-custom-domain-konfigurieren).
+
+</details>
+
 ---
 
-## 🌐 Phase 5: Access Application
+## 🌐 Phase 5: Custom Domain & HTTPS Setup (Referenz)
 
-### Schritt 1: ALB URL holen
+> [!NOTE]
+> Wenn du **Option A** verwendet hast, ist Phase 5 bereits in Schritt 2 enthalten!
+> Dieser Abschnitt dient als Referenz für Details und Troubleshooting.
 
-```powershell
-$ALB_URL = (kubectl get ingress overcookied-ingress -n overcookied -o jsonpath='{.status.loadBalancer.ingress[0].hostname}')
-Write-Host "Application URL: http://$ALB_URL"
-```
+> [!CAUTION]
+> **Dieser Schritt ist PFLICHT für produktiven Betrieb!**
+> Ohne diesen Schritt funktioniert nur HTTP über die ALB-URL, nicht HTTPS über overcookied.de.
 
-### Schritt 2: Backend Health Check
+### Schritt 1: OAuth URLs aktualisieren und Route 53 DNS updaten
 
-```powershell
-curl "http://$ALB_URL/health"
-```
-
-**Erwartete Ausgabe:**
-```json
-{"message":"Backend is running","status":"healthy"}
-```
-
-### Schritt 3: Browser öffnen
+Nach dem ALB provisioning, update DNS und OAuth ConfigMap:
 
 ```powershell
-Start-Process "http://$ALB_URL"
+cd C:\Users\mauri\Local Docs\overcookied
+.\scripts\update-oauth-config.ps1 -UpdateDNS -RestartBackend
 ```
 
-**Oder manuell:** Öffne `http://<ALB_URL>/` im Browser
+**Das Script führt aus:**
+1. Wartet auf ALB hostname
+2. Updated Route 53 A-Record für `overcookied.de` → zeigt auf neuen ALB
+3. Updated OAuth ConfigMap mit HTTPS URLs (`https://overcookied.de`)
+4. Startet Backend neu für neue Config
+
+> [!NOTE]
+> Bei jedem neuen ALB (z.B. nach Cluster-Recreate) ändert sich die ALB-URL!
+> Route 53 muss dann erneut aktualisiert werden.
+
+### Schritt 2: SSL Zertifikat verifizieren
+
+```powershell
+aws acm describe-certificate --certificate-arn arn:aws:acm:eu-central-1:032073356456:certificate/75eb55b7-dde0-4aac-9836-278ed5d8063c --query "Certificate.Status"
+```
+
+**Erwartete Ausgabe:** `"ISSUED"`
+
+### Schritt 3: DNS Resolution testen
+
+```powershell
+# Via öffentlichen DNS (empfohlen bei lokalen DNS-Problemen)
+nslookup overcookied.de 8.8.8.8
+```
+
+> [!TIP]
+> Falls lokale DNS-Auflösung nicht funktioniert (z.B. bei Fritz.box Router), 
+> liegt das oft an DNS-Caching. Lösung: `ipconfig /flushdns` oder direkt 8.8.8.8 als DNS verwenden.
+
+### Schritt 4: Application testen
+
+```powershell
+Start-Process "https://overcookied.de"
+```
+
+**Teste:**
+- [ ] HTTPS funktioniert (Schloss-Symbol)
+- [ ] Login mit Google funktioniert
+- [ ] Redirect nach Login korrekt
 
 ---
 
@@ -326,7 +405,7 @@ Start-Process "http://$ALB_URL"
 Deine Overcookied Application läuft jetzt auf:
 - **EKS Cluster:** `overcookied-eks`
 - **Region:** `eu-central-1`
-- **URL:** `http://<ALB_URL>/`
+- **URL:** `https://overcookied.de` 🔒
 
 ### Monitoring & Logs
 
@@ -439,14 +518,36 @@ terraform state list
 Nach einem Destroy kannst du EKS schnell wieder neu erstellen:
 
 ```powershell
+# 1. EKS Cluster erstellen (~15-20 Min)
 cd infra\eks
 terraform apply
+
+# 2. kubectl konfigurieren
 aws eks update-kubeconfig --region eu-central-1 --name overcookied-eks
+
+# 3. Application deployen (erstellt JWT Secret automatisch)
 cd ..\..
 .\scripts\deploy-app.ps1
+
+# 4. Custom Domain & OAuth konfigurieren (updated Route 53 mit neuem ALB)
+.\scripts\update-oauth-config.ps1 -UpdateDNS -RestartBackend
 ```
 
 **Dauer:** ~20-25 Minuten (schneller als initial, da VPC/ECR/Images existieren)
+
+### Was bleibt erhalten nach Destroy?
+- ✅ Route 53 Hosted Zone & Nameserver
+- ✅ ACM Zertifikat (bereits validiert)
+- ✅ DynamoDB Tabellen
+- ✅ AWS Secrets Manager (OAuth Credentials)
+- ✅ ECR Images
+- ✅ Google OAuth Console Konfiguration
+
+### Was wird neu erstellt?
+- 🔄 EKS Cluster
+- 🔄 ALB (neuer Hostname → Route 53 muss updated werden)
+- 🔄 JWT Secret (automatisch durch deploy-app.ps1)
+- 🔄 Kubernetes ConfigMaps
 
 **Kosten:** ~€0 während zerstört, ~€156/Monat während aktiv
 
@@ -481,6 +582,37 @@ kubectl logs -n kube-system deployment/aws-load-balancer-controller
 ```powershell
 kubectl describe pod <pod-name> -n overcookied
 kubectl logs <pod-name> -n overcookied
+```
+
+### OAuth Login fehlschlägt (invalid_state)
+
+Dies bedeutet Cookie-Probleme zwischen Pods. Prüfe:
+1. HTTPS ist korrekt konfiguriert
+2. Alle Backend Pods nutzen denselben JWT Secret
+
+```powershell
+# JWT Secret prüfen
+kubectl get secret jwt-secret -n overcookied
+
+# Wenn nicht vorhanden, neu erstellen:
+$secret = -join ((65..90) + (97..122) + (48..57) | Get-Random -Count 32 | ForEach-Object {[char]$_})
+kubectl create secret generic jwt-secret --from-literal=JWT_SECRET=$secret -n overcookied
+kubectl rollout restart deployment/overcookied-backend -n overcookied
+```
+
+### OAuth Redirect falsch (localhost statt Domain)
+
+Frontend verwendet noch alte URLs. Rebuild und Deploy:
+
+```powershell
+.\scripts\build-and-push.ps1
+kubectl rollout restart deployment/overcookied-frontend -n overcookied
+```
+
+### Route 53 DNS zeigt auf alten ALB
+
+```powershell
+.\scripts\update-oauth-config.ps1 -UpdateDNS -RestartBackend
 ```
 
 ### Backend kann nicht auf DynamoDB zugreifen

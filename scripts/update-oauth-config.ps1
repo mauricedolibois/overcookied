@@ -1,20 +1,22 @@
 <#
 .SYNOPSIS
-    Updates the OAuth ConfigMap with the ALB URL after deployment
+    Updates the OAuth ConfigMap with the custom domain URL after deployment
 .DESCRIPTION
-    This script fetches the ALB hostname from the Kubernetes ingress and updates
-    the oauth-config ConfigMap with the correct redirect URLs.
+    This script updates the oauth-config ConfigMap with the correct redirect URLs
+    for the custom domain (overcookied.de). It also updates Route 53 if needed.
     Run this after the ALB is provisioned.
 #>
 
 param(
     [string]$Namespace = "overcookied",
-    [switch]$RestartBackend
+    [string]$Domain = "overcookied.de",
+    [switch]$RestartBackend,
+    [switch]$UpdateDNS
 )
 
 $ErrorActionPreference = "Stop"
 
-Write-Host "`n🔧 Updating OAuth Configuration..." -ForegroundColor Cyan
+Write-Host "`n🔧 Updating OAuth Configuration for $Domain..." -ForegroundColor Cyan
 
 # Wait for ALB to be provisioned
 Write-Host "⏳ Waiting for ALB hostname..." -ForegroundColor Yellow
@@ -40,8 +42,50 @@ if (-not $albHostname -or $albHostname -eq "") {
     exit 1
 }
 
-# Construct the URLs
-$baseUrl = "http://$albHostname"
+# Update Route 53 DNS record if requested
+if ($UpdateDNS) {
+    Write-Host "`n🌐 Updating Route 53 DNS record..." -ForegroundColor Yellow
+    
+    # Get the hosted zone ID
+    $zoneId = aws route53 list-hosted-zones --query "HostedZones[?Name=='$Domain.'].Id" --output text
+    if (-not $zoneId) {
+        Write-Host "❌ Hosted zone for $Domain not found" -ForegroundColor Red
+        exit 1
+    }
+    $zoneId = $zoneId -replace '/hostedzone/', ''
+    Write-Host "   Hosted Zone ID: $zoneId" -ForegroundColor Gray
+    
+    # Create the change batch JSON
+    $changeBatch = @"
+{
+  "Changes": [
+    {
+      "Action": "UPSERT",
+      "ResourceRecordSet": {
+        "Name": "$Domain",
+        "Type": "A",
+        "AliasTarget": {
+          "HostedZoneId": "Z215JYRZR1TBD5",
+          "DNSName": "$albHostname",
+          "EvaluateTargetHealth": true
+        }
+      }
+    }
+  ]
+}
+"@
+    
+    $tempFile = [System.IO.Path]::GetTempFileName()
+    $changeBatch | Out-File -FilePath $tempFile -Encoding UTF8
+    
+    aws route53 change-resource-record-sets --hosted-zone-id $zoneId --change-batch file://$tempFile
+    Remove-Item $tempFile
+    
+    Write-Host "✅ DNS record updated for $Domain" -ForegroundColor Green
+}
+
+# Construct the URLs with HTTPS
+$baseUrl = "https://$Domain"
 $redirectUrl = "$baseUrl/auth/google/callback"
 
 Write-Host "`n📝 OAuth URLs:" -ForegroundColor Cyan

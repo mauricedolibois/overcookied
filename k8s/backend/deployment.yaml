@@ -56,6 +56,12 @@ spec:
         # Session secret (optional, can also be from Secrets Manager)
         - name: SESSION_SECRET
           value: "changeme-use-secrets-manager-in-production"
+        # JWT secret for token signing - shared across all replicas
+        - name: JWT_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: jwt-secret
+              key: JWT_SECRET
         resources:
           requests:
             cpu: 100m

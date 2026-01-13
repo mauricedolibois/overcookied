@@ -48,6 +48,30 @@ Write-Host "🔑 Deploying OAuth ConfigMap..." -ForegroundColor Yellow
 kubectl apply -f "$PROJECT_ROOT\k8s\backend\oauth-configmap.yaml"
 Write-Host ""
 
+# Create or verify JWT Secret for token signing
+Write-Host "🔐 Setting up JWT Secret..." -ForegroundColor Yellow
+$jwtSecretExists = kubectl get secret jwt-secret -n $NAMESPACE 2>$null
+if ($LASTEXITCODE -ne 0) {
+    Write-Host "  📝 JWT secret not found in Kubernetes..." -ForegroundColor Cyan
+    
+    # Try to get JWT secret from AWS Secrets Manager
+    $awsJwtSecret = aws secretsmanager get-secret-value --secret-id "overcookied/jwt-secret" --region eu-central-1 --query SecretString --output text 2>$null
+    
+    if ($LASTEXITCODE -eq 0 -and $awsJwtSecret) {
+        Write-Host "  📦 Retrieved JWT secret from AWS Secrets Manager" -ForegroundColor Cyan
+        $jwtSecretValue = ($awsJwtSecret | ConvertFrom-Json).jwt_secret
+    } else {
+        Write-Host "  ⚠️  No JWT secret in Secrets Manager, generating new one..." -ForegroundColor Yellow
+        $jwtSecretValue = -join ((65..90) + (97..122) + (48..57) | Get-Random -Count 64 | ForEach-Object {[char]$_})
+    }
+    
+    kubectl create secret generic jwt-secret --from-literal=JWT_SECRET=$jwtSecretValue -n $NAMESPACE
+    Write-Host "  ✅ JWT secret created in Kubernetes" -ForegroundColor Green
+} else {
+    Write-Host "  ✅ JWT secret already exists" -ForegroundColor Green
+}
+Write-Host ""
+
 # Deploy Backend
 Write-Host "🔧 Deploying Backend..." -ForegroundColor Yellow
 kubectl apply -f "$PROJECT_ROOT\k8s\backend\serviceaccount.yaml"

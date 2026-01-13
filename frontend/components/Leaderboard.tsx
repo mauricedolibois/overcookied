@@ -16,7 +16,7 @@ export default function Leaderboard() {
   useEffect(() => {
     async function fetchLeaderboard() {
       try {
-        const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/leaderboard`);
+        const res = await fetch(`/api/leaderboard`);
         if (res.ok) {
           const data = await res.json();
           console.log("Leaderboard Data:", data);

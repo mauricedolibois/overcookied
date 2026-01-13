@@ -1,1 +1,1 @@
-wenn wir ein anderen anbieter verwenden z.b ionos wäre es dann möglich im free tier das dann zu benutzen?
+Fasse diesen Chat in einem kurzen Bericht zusammen. Speichere diesen Bericht als Markdown datei. Fasse zusammen was wir gemacht haben, auf welche Probleme wir gestoßen sind und wie wir sie gelöst haben 

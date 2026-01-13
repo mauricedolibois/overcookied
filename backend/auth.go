@@ -24,9 +24,15 @@ import (
 
 var (
 	googleOauthConfig *oauth2.Config
-	oauthStateString  string
 	jwtSecret         []byte
 )
+
+// generateOAuthState creates a unique state string for CSRF protection
+func generateOAuthState() string {
+	b := make([]byte, 32)
+	rand.Read(b)
+	return base64.URLEncoding.EncodeToString(b)
+}
 
 type UserSession struct {
 	ID      string `json:"id"`
@@ -134,11 +140,6 @@ func initOAuth() {
 		Endpoint: google.Endpoint,
 	}
 
-	// Generate random state string
-	b := make([]byte, 32)
-	rand.Read(b)
-	oauthStateString = base64.URLEncoding.EncodeToString(b)
-
 	// Initialize JWT secret
 	jwtSecretStr := os.Getenv("JWT_SECRET")
 	if jwtSecretStr == "" {
@@ -154,7 +155,22 @@ func initOAuth() {
 
 func handleGoogleLogin(w http.ResponseWriter, r *http.Request) {
 	log.Printf("[AUTH] Google OAuth login initiated from IP: %s", r.RemoteAddr)
-	url := googleOauthConfig.AuthCodeURL(oauthStateString, oauth2.AccessTypeOffline)
+
+	// Generate a unique state for this request
+	state := generateOAuthState()
+
+	// Store state in a cookie (works across multiple replicas)
+	http.SetCookie(w, &http.Cookie{
+		Name:     "oauth_state",
+		Value:    state,
+		Path:     "/",
+		MaxAge:   300, // 5 minutes
+		HttpOnly: true,
+		Secure:   strings.HasPrefix(os.Getenv("GOOGLE_REDIRECT_URL"), "https://"),
+		SameSite: http.SameSiteLaxMode,
+	})
+
+	url := googleOauthConfig.AuthCodeURL(state, oauth2.AccessTypeOffline)
 	log.Printf("[AUTH] Redirecting to Google OAuth URL")
 	http.Redirect(w, r, url, http.StatusTemporaryRedirect)
 }
@@ -166,9 +182,27 @@ func handleGoogleCallback(w http.ResponseWriter, r *http.Request) {
 		frontendURL = "http://localhost:3000"
 	}
 
+	// Get the expected state from the cookie
+	stateCookie, err := r.Cookie("oauth_state")
+	if err != nil {
+		log.Printf("[AUTH] ERROR: OAuth state cookie not found: %v", err)
+		http.Redirect(w, r, fmt.Sprintf("%s/login?error=invalid_state", frontendURL), http.StatusTemporaryRedirect)
+		return
+	}
+	expectedState := stateCookie.Value
+
+	// Clear the state cookie
+	http.SetCookie(w, &http.Cookie{
+		Name:     "oauth_state",
+		Value:    "",
+		Path:     "/",
+		MaxAge:   -1,
+		HttpOnly: true,
+	})
+
 	state := r.FormValue("state")
-	if state != oauthStateString {
-		log.Printf("[AUTH] ERROR: Invalid OAuth state - potential CSRF attack from IP: %s", r.RemoteAddr)
+	if state != expectedState {
+		log.Printf("[AUTH] ERROR: Invalid OAuth state - potential CSRF attack from IP: %s (expected: %s, got: %s)", r.RemoteAddr, expectedState[:10], state[:10])
 		http.Redirect(w, r, fmt.Sprintf("%s/login?error=invalid_state", frontendURL), http.StatusTemporaryRedirect)
 		return
 	}

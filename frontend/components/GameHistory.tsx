@@ -28,7 +28,7 @@ export default function GameHistory({ userId }: GameHistoryProps) {
     async function fetchHistory() {
       if (!userId) return;
       try {
-        const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/history?userId=${userId}`);
+        const res = await fetch(`/api/history?userId=${userId}`);
         if (res.ok) {
           const data = await res.json();
           console.log("History Data:", data);

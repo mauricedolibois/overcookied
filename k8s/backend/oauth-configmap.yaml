@@ -10,7 +10,7 @@ metadata:
     app: overcookied
     component: config
 data:
-  # Format: http://<ALB_HOSTNAME>/auth/google/callback
-  GOOGLE_REDIRECT_URL: "http://k8s-overcook-overcook-4c03cb3f56-1082818309.eu-central-1.elb.amazonaws.com/auth/google/callback"
-  # Format: http://<ALB_HOSTNAME>
-  FRONTEND_URL: "http://k8s-overcook-overcook-4c03cb3f56-1082818309.eu-central-1.elb.amazonaws.com"
+  # Format: https://<DOMAIN>/auth/google/callback
+  GOOGLE_REDIRECT_URL: "https://overcookied.de/auth/google/callback"
+  # Format: https://<DOMAIN>
+  FRONTEND_URL: "https://overcookied.de"

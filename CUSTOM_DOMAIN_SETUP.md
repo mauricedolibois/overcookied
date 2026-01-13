@@ -237,17 +237,70 @@ kubectl rollout restart deployment/overcookied-backend -n overcookied
 
 ## Summary Checklist
 
-- [ ] Register domain `overcookied.de`
-- [ ] Create Route 53 hosted zone
-- [ ] Update nameservers at registrar
-- [ ] Wait for DNS propagation (24-48 hours)
-- [ ] Create ACM certificate
-- [ ] Validate ACM certificate via DNS
-- [ ] Create A record alias to ALB
-- [ ] Update Kubernetes Ingress with HTTPS
-- [ ] Update Google OAuth redirect URIs
-- [ ] Update OAuth ConfigMap
-- [ ] Test login at `https://app.overcookied.de`
+- [x] Register domain `overcookied.de`
+- [x] Create Route 53 hosted zone
+- [x] Update nameservers at registrar
+- [x] Wait for DNS propagation (24-48 hours)
+- [x] Create ACM certificate
+- [x] Validate ACM certificate via DNS
+- [x] Create A record alias to ALB
+- [x] Update Kubernetes Ingress with HTTPS
+- [x] Update Google OAuth redirect URIs
+- [x] Update OAuth ConfigMap
+- [x] Test login at `https://overcookied.de`
+
+---
+
+## Re-Deployment After Cluster Destroy
+
+When the EKS cluster is destroyed and recreated, follow these steps:
+
+### What Persists (No action needed)
+- Route 53 Hosted Zone and Nameserver settings
+- ACM Certificate (already validated)
+- DynamoDB tables
+- AWS Secrets Manager (OAuth credentials)
+- ECR images
+- Google OAuth configuration (in Google Console)
+
+### What Needs Recreation
+
+1. **Deploy the cluster and application:**
+   ```powershell
+   # Deploy EKS
+   cd infra/eks
+   terraform apply
+   
+   # Update kubeconfig
+   aws eks update-kubeconfig --region eu-central-1 --name overcookied-eks
+   
+   # Deploy application (this creates JWT secret automatically)
+   .\scripts\deploy-app.ps1
+   ```
+
+2. **Update Route 53 DNS record (ALB hostname changes):**
+   ```powershell
+   .\scripts\update-oauth-config.ps1 -UpdateDNS -RestartBackend
+   ```
+
+3. **Verify everything works:**
+   ```powershell
+   # Test DNS resolution
+   nslookup overcookied.de
+   
+   # Check pods
+   kubectl get pods -n overcookied
+   
+   # Visit https://overcookied.de/login
+   ```
+
+### Key Resources Created by Scripts
+
+| Resource | Created By | Persists? |
+|----------|-----------|-----------|
+| JWT Secret | `deploy-app.ps1` | No - recreated on deploy |
+| OAuth ConfigMap | `deploy-app.ps1` | No - recreated with defaults |
+| Route 53 A Record | `update-oauth-config.ps1 -UpdateDNS` | Yes - but needs update with new ALB |
 
 ---
 
@@ -255,7 +308,7 @@ kubectl rollout restart deployment/overcookied-backend -n overcookied
 
 ### DNS Not Resolving
 ```powershell
-nslookup app.overcookied.de
+nslookup overcookied.de
 ```
 Wait for propagation or check nameserver configuration.
 
@@ -264,3 +317,9 @@ Check the ACM certificate status in AWS Console. Ensure DNS validation records a
 
 ### OAuth Redirect Mismatch
 Ensure the redirect URI in Google Console **exactly** matches what's in the ConfigMap.
+
+### Invalid State Error
+This means cookies aren't working properly. Check:
+- HTTPS is configured correctly
+- Cookie SameSite settings are correct for your domain
+- Both pods are using the same OAuth state mechanism (cookie-based)

@@ -6,26 +6,6 @@ export interface UserSession {
   token: string;
 }
 
-// Get the API URL dynamically - use relative paths in production, localhost in development
-// IMPORTANT: Call this function each time you need the URL (don't cache the result)
-const getApiUrl = (): string => {
-  if (typeof window === 'undefined') {
-    // Server-side - use env var or empty (relative)
-    return process.env.NEXT_PUBLIC_API_URL || '';
-  }
-  // Client-side - use current origin for relative URLs or explicit env var
-  const envUrl = process.env.NEXT_PUBLIC_API_URL;
-  if (envUrl && envUrl !== '') {
-    return envUrl;
-  }
-  // In production, use relative URLs (same host)
-  if (window.location.hostname !== 'localhost') {
-    return '';  // Relative URL - will use current host
-  }
-  // Local development
-  return 'http://localhost:8080';
-};
-
 export const authService = {
   // Get current user from localStorage
   getCurrentUser(): UserSession | null {
@@ -49,7 +29,8 @@ export const authService = {
   // Verify session with backend (JWT validation)
   async verifySession(token: string): Promise<UserSession | null> {
     try {
-      const response = await fetch(`${getApiUrl()}/auth/verify`, {
+      // Use relative URL - works because frontend and backend share the same host
+      const response = await fetch('/auth/verify', {
         method: 'GET',
         headers: {
           'Authorization': `Bearer ${token}`,
@@ -74,7 +55,8 @@ export const authService = {
     const user = this.getCurrentUser();
     if (user?.token) {
       try {
-        await fetch(`${getApiUrl()}/auth/logout`, {
+        // Use relative URL
+        await fetch('/auth/logout', {
           method: 'POST',
           headers: {
             'Authorization': `Bearer ${user.token}`,
@@ -91,7 +73,8 @@ export const authService = {
 
   // Initiate Google OAuth login
   loginWithGoogle() {
-    window.location.href = `${getApiUrl()}/auth/google/login`;
+    // Use relative URL - the browser will use the current origin
+    window.location.href = '/auth/google/login';
   },
 
   // Check if user is authenticated (validates JWT locally)
