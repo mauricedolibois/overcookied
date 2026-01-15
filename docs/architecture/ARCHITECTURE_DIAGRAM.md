@@ -22,11 +22,20 @@ graph TB
         GameManager[Game Manager]
         GameRoom[Game Room]
         Auth[Auth Service]
+        RedisClient[Redis Client]
         
         HTTPServer --> WSHandler
         HTTPServer --> Auth
         WSHandler --> GameManager
         GameManager --> GameRoom
+        GameManager --> RedisClient
+        GameRoom --> RedisClient
+    end
+
+    subgraph Cache["AWS ElastiCache (Valkey)"]
+        MatchQueue[(Matchmaking Queue)]
+        GameState[(Game State)]
+        PubSub[Pub/Sub Channels]
     end
 
     subgraph Database["AWS DynamoDB"]
@@ -42,9 +51,48 @@ graph TB
     Browser -->|WebSocket| WSHandler
     Auth -->|JWT Verify| HTTPServer
     Auth -->|OAuth Flow| GoogleOAuth
+    RedisClient -->|Queue Operations| MatchQueue
+    RedisClient -->|State Sync| GameState
+    RedisClient -->|Event Broadcast| PubSub
     GameRoom -->|Store Stats| UsersTable
     GameRoom -->|Store History| GamesTable
     Auth -->|CRUD| UsersTable
+```
+
+## Distributed Matchmaking Flow
+
+```mermaid
+sequenceDiagram
+    participant P1 as Player 1 (Pod A)
+    participant PodA as Backend Pod A
+    participant Redis as ElastiCache (Valkey)
+    participant PodB as Backend Pod B
+    participant P2 as Player 2 (Pod B)
+
+    P1->>PodA: JOIN_QUEUE
+    PodA->>Redis: ZADD matchmaking:queue (Player1)
+    P2->>PodB: JOIN_QUEUE
+    PodB->>Redis: ZADD matchmaking:queue (Player2)
+    
+    Note over PodA,PodB: Both pods try matchmaking periodically
+    
+    PodA->>Redis: SETNX matchmaking:lock
+    Redis->>PodA: Lock acquired
+    PodA->>Redis: ZRANGE queue (get 2 players)
+    Redis->>PodA: [Player1, Player2]
+    PodA->>Redis: ZREM (remove both)
+    PodA->>Redis: DEL lock
+    
+    PodA->>Redis: SET game:{roomId} (create state)
+    PodA->>Redis: PUBLISH match:notify
+    
+    Redis->>PodA: Match notification
+    Redis->>PodB: Match notification
+    
+    PodA->>P1: GAME_START
+    PodB->>P2: GAME_START
+    
+    Note over PodA,PodB: Game state synced via Redis
 ```
 
 ## Authentifizierungsfluss
@@ -90,9 +138,15 @@ graph TB
         SendChannel[send channel]
     end
 
+    subgraph "ElastiCache (Valkey)"
+        RedisQueue[(Matchmaking Queue)]
+        RedisState[(Game State)]
+        RedisPubSub[Pub/Sub]
+        RedisLock[Distributed Lock]
+    end
+
     subgraph "Game Logic Layer"
         Manager[Game Manager]
-        Queue[Match Queue]
         Room1[Game Room 1]
         Room2[Game Room 2]
         RoomN[Game Room N]
@@ -104,10 +158,17 @@ graph TB
     ClientStruct -->|spawn| ReadPump
     ClientStruct -->|spawn| WritePump
     ReadPump -->|Messages| Manager
-    Manager -->|Matchmaking| Queue
-    Queue -->|Create Pairs| Room1
-    Queue -->|Create Pairs| Room2
-    Queue -->|Create Pairs| RoomN
+    Manager -->|Add to Queue| RedisQueue
+    Manager -->|Acquire Lock| RedisLock
+    RedisLock -->|Create Match| Room1
+    RedisLock -->|Create Match| Room2
+    RedisLock -->|Create Match| RoomN
+    Room1 -->|State Sync| RedisState
+    Room2 -->|State Sync| RedisState
+    RoomN -->|State Sync| RedisState
+    Room1 -->|Broadcast Events| RedisPubSub
+    Room2 -->|Broadcast Events| RedisPubSub
+    RoomN -->|Broadcast Events| RedisPubSub
     Room1 -->|State Updates| SendChannel
     Room2 -->|State Updates| SendChannel
     RoomN -->|State Updates| SendChannel
@@ -117,6 +178,7 @@ graph TB
 
     style "Client Connection" fill:#e3f2fd
     style "Backend WebSocket Layer" fill:#fff3e0
+    style "ElastiCache (Valkey)" fill:#ffcdd2
     style "Game Logic Layer" fill:#f3e5f5
 ```
 
@@ -125,24 +187,25 @@ graph TB
 ```mermaid
 stateDiagram-v2
     [*] --> Waiting: Players Join Queue
-    Waiting --> Matched: 2 Players Found
-    Matched --> Starting: Create GameRoom
+    Waiting --> Matched: 2 Players Found (Redis)
+    Matched --> Starting: Create GameRoom + Redis State
     Starting --> Countdown: Broadcast GAME_START
     Countdown --> Playing: 5 Second Countdown
     
-    Playing --> Playing: Process Clicks
-    Playing --> Playing: Spawn Golden Cookie
+    Playing --> Playing: Process Clicks (Atomic Redis Update)
+    Playing --> Playing: Spawn Golden Cookie (Redis Sync)
     Playing --> Playing: Broadcast UPDATE
     Playing --> GameOver: Time Expires
     Playing --> GameOver: Player Quits
     
     GameOver --> SaveStats: Determine Winner
     SaveStats --> Cleanup: Write to DynamoDB
-    Cleanup --> [*]
+    Cleanup --> RedisCleanup: Delete Redis State
+    RedisCleanup --> [*]
 
     note right of Playing
         Game Loop (1 sec tick)
-        - Update Timer
+        - Update Timer (Redis)
         - Process Events
         - Broadcast State
     end note
@@ -164,6 +227,7 @@ sequenceDiagram
     participant Read as ReadPump
     participant Manager as GameManager
     participant Room as GameRoom
+    participant Redis as ElastiCache (Valkey)
     participant Write as WritePump
 
     UI->>Hook: User clicks cookie
@@ -173,9 +237,9 @@ sequenceDiagram
     Read->>Manager: Route message
     Manager->>Room: Forward to correct room
     
-    Room->>Room: Mutex Lock
-    Room->>Room: Increment score
-    Room->>Room: Mutex Unlock
+    Room->>Redis: AtomicScoreIncrement()
+    Redis->>Redis: WATCH/MULTI transaction
+    Redis->>Room: Updated state
     
     Room->>Room: Prepare UPDATE message
     Room->>Write: Push to send channel
@@ -243,6 +307,9 @@ graph TB
     end
 
     subgraph "AWS Cloud"
+        subgraph "ElastiCache"
+            Valkey[(Valkey 8.0)]
+        end
         DDB[(DynamoDB)]
     end
 
@@ -257,6 +324,8 @@ graph TB
     FEService --> FE2
     BEService --> BE1
     BEService --> BE2
+    BE1 -->|Game State/Queue| Valkey
+    BE2 -->|Game State/Queue| Valkey
     BE1 --> DDB
     BE2 --> DDB
     BE1 --> OAuth
@@ -288,24 +357,30 @@ graph LR
         Gorilla[gorilla/websocket]
         NetHTTP[net/http]
         AWSSDK[AWS SDK]
+        GoRedis[go-redis/v9]
         
         Go --> Gorilla
         Go --> NetHTTP
         Go --> AWSSDK
+        Go --> GoRedis
     end
 
     subgraph Infrastructure
         Docker[Docker]
         K8s[Kubernetes]
         AWS[AWS DynamoDB]
+        Valkey[AWS ElastiCache Valkey]
+        Valkey[AWS ElastiCache Valkey]
         
         Docker --> K8s
         K8s --> AWS
+        K8s --> Valkey
     end
 
     Frontend -.->|WebSocket| Backend
     Frontend -.->|HTTP/REST| Backend
     Backend -.->|Persist| Infrastructure
+    Backend -.->|State/Queue| Valkey
 
     style Frontend fill:#61dafb20
     style Backend fill:#00add820
@@ -413,4 +488,75 @@ graph TB
     style "Client → Server" fill:#e3f2fd
     style "Server → Client" fill:#fff3e0
     style "Game State Machine" fill:#f3e5f5
+```
+
+## ElastiCache (Valkey) Key Schema
+
+```mermaid
+graph TB
+    subgraph "Matchmaking Keys"
+        Queue["overcookied:matchmaking:queue<br/>(Sorted Set - timestamp score)"]
+        Lock["overcookied:matchmaking:lock<br/>(String - distributed lock)"]
+        Notify["overcookied:match:notify<br/>(Pub/Sub channel)"]
+    end
+
+    subgraph "Game State Keys"
+        GameState["overcookied:game:{roomId}<br/>(JSON - game state)"]
+        GameEvents["overcookied:game:events<br/>(Pub/Sub channel)"]
+    end
+
+    subgraph "Key Properties"
+        QueueTTL["Queue Entry TTL: 30s"]
+        LockTTL["Lock TTL: 2s"]
+        StateTTL["Game State TTL: 10min"]
+    end
+
+    Queue -.-> QueueTTL
+    Lock -.-> LockTTL
+    GameState -.-> StateTTL
+
+    style "Matchmaking Keys" fill:#e3f2fd
+    style "Game State Keys" fill:#fff3e0
+    style "Key Properties" fill:#f3e5f5
+```
+
+## Distributed Game State Structure
+
+```mermaid
+classDiagram
+    class DistributedGameState {
+        +string RoomID
+        +string Player1ID
+        +string Player2ID
+        +string Player1Name
+        +string Player2Name
+        +string Player1Picture
+        +string Player2Picture
+        +int P1Score
+        +int P2Score
+        +int TimeRemaining
+        +bool GoldenCookieActive
+        +float64 GoldenCookieX
+        +float64 GoldenCookieY
+        +map~string,int64~ DoubleClickExpiry
+        +bool GameStarted
+        +bool GameEnded
+        +string WinnerID
+        +string TimerPodID
+    }
+    
+    class QueueEntry {
+        +string UserID
+        +string Name
+        +string Picture
+        +string PodID
+        +int64 JoinedAt
+    }
+    
+    class MatchNotification {
+        +string Player1ID
+        +string Player2ID
+        +string RoomID
+        +string HostPodID
+    }
 ```

@@ -39,6 +39,10 @@ Dies ist die unterste Ebene. Sie muss zuerst existieren und ändert sich fast ni
 
 #### 5. `terraform.tfvars` & `variables.tf`
 *   **Was ist das?** Deine Konfiguration. Statt "eu-central-1" überall hardzucoden, schreiben wir `var.aws_region`. Das macht den Code sauberer und wiederverwendbar.
+*   **Wichtige Variablen im EKS-Layer:**
+    *   `valkey_node_type`: ElastiCache Node-Größe (default: `cache.t3.micro` für Free Tier).
+    *   `node_instance_types`: EC2 Instanztypen für EKS-Nodes.
+    *   `dynamodb_table_users/games`: DynamoDB Tabellennamen.
 
 ---
 
@@ -65,6 +69,7 @@ Hier wird es spannend. Dieser Code baut das eigentliche Cluster *in* das Fundame
 *   **Regeln:**
     *   `cluster_sg`: Erlaubt Kommunikation zur Control Plane.
     *   `nodes_sg`: Erlaubt Kommunikation zwischen den Nodes und zu den Pods.
+*   **Hinweis:** ElastiCache hat eine eigene Security Group (`valkey_sg` in `elasticache.tf`), die nur Traffic von EKS-Nodes auf Port 6379 erlaubt.
 
 #### 8. `backend.tf` (Das Gedächtnis & Provider)
 *   **Was ist das?** Macht zwei Dinge:
@@ -87,8 +92,27 @@ Hier wird es spannend. Dieser Code baut das eigentliche Cluster *in* das Fundame
 *   **Inhalt:**
     *   `kubeconfig_command`: Der Befehl, den du kopieren kannst, um dich mit `kubectl` einzuloggen.
     *   `alb_controller_role_arn`: Die Rolle für den Load Balancer.
+    *   `valkey_endpoint`: Die Adresse des ElastiCache Valkey Clusters für Redis-Verbindungen.
+    *   `valkey_port`: Der Port (6379) für Valkey-Verbindungen.
 
-#### 12. `route53.tf` (Das Telefonbuch & Sicherheit)
+#### 12. `elasticache.tf` (Distributed State) ⭐️ *Neu*
+*   **Was ist das?** AWS ElastiCache mit Valkey 8.0 als verteilter Cache für Matchmaking und Game State.
+*   **Warum brauchen wir das?** Ohne ElastiCache würde jeder Backend-Pod seinen eigenen Matchmaking-Queue haben. Spieler auf Pod A würden nie mit Spielern auf Pod B gematcht werden.
+*   **Wichtige Ressourcen:**
+    *   `aws_elasticache_subnet_group`: Definiert, in welchen Subnets der Cache laufen soll.
+    *   `aws_security_group`: Firewall-Regeln. Erlaubt nur Traffic von EKS-Nodes auf Port 6379.
+    *   `aws_elasticache_replication_group`: Der eigentliche Valkey-Cluster.
+        *   *Engine:* `valkey` (Redis-kompatibel, aber Open Source).
+        *   *Version:* 8.0
+        *   *Node Type:* `cache.t3.micro` (Free Tier eligible).
+        *   *Single Node:* Keine Replicas für Kosteneinsparung.
+*   **Verwendungszweck:**
+    *   **Matchmaking Queue:** Redis Sorted Set für FIFO-Warteschlange.
+    *   **Distributed Locking:** Verhindert Race Conditions beim Matching.
+    *   **Game State:** JSON-Speicherung des Spielzustands.
+    *   **Pub/Sub:** Event-Broadcasting zwischen Pods.
+
+#### 13. `route53.tf` (Das Telefonbuch & Sicherheit)
 *   **Was ist das?** Route 53 ist der DNS-Service von AWS. Er übersetzt `overcookied.de` in die IP-Adresse deines Load Balancers. Zudem wäre hier das Zertifikats-Management (HTTPS) geregelt.
 *   **Aktueller Status:** In deinem Code ist fast alles **auskommentiert**.
 *   **Warum?** Domains kosten Geld (auch bei AWS). Dein Free-Tier deckt das nicht ab.
@@ -124,6 +148,9 @@ Wenn Terraform fertig ist, steht nur die leere Hülle (das Cluster). Die YAML-Da
     *   `replicas: 2`: Wir wollen immer 2 Kopien haben (für Ausfallsicherheit).
     *   `serviceAccountName`: Verknüpfung zur IAM-Rolle aus `irsa.tf`.
     *   `env`: Umgebungsvariablen. Hier werden z.B. die DynamoDB-Tabellennamen übergeben.
+        *   `REDIS_ENDPOINT`: Verbindung zum ElastiCache Valkey für verteiltes Matchmaking (aus `redis-config` ConfigMap).
+        *   `JWT_SECRET`: Shared Secret für Token-Signierung über alle Replicas.
+        *   `GOOGLE_REDIRECT_URL`: OAuth Callback URL (dynamisch nach ALB-Erstellung).
 
 #### 11. `service.yaml`
 *   **Was ist das?** Ein stabiler Netzwerk-Endpunkt.
@@ -132,6 +159,13 @@ Wenn Terraform fertig ist, steht nur die leere Hülle (das Cluster). Die YAML-Da
 #### 12. `oauth-configmap.yaml` (Dynamische Config)
 *   **Was ist das?** Eine Konfigurationsdatei, die wir zur Laufzeit ändern können.
 *   **Trick:** Unser Deploy-Skript schreibt hier die echte URL des Load Balancers rein, *nachdem* er erstellt wurde. So weiß das Backend, wohin es nach dem Google Login redirecten muss.
+
+#### 13. `redis-configmap.yaml` (ElastiCache Verbindung) ⭐️ *Neu*
+*   **Was ist das?** ConfigMap für die Valkey/Redis-Verbindungsdaten.
+*   **Inhalt:**
+    *   `REDIS_ENDPOINT`: Die Adresse des ElastiCache Clusters (Format: `endpoint:6379`).
+*   **Dynamische Aktualisierung:** Das Deploy-Skript (`deploy-app.ps1`) holt sich den Endpoint aus Terraform Output und aktualisiert diese ConfigMap automatisch.
+*   **Fallback:** Wenn kein Valkey verfügbar ist, nutzt das Backend In-Memory Matchmaking (nicht skalierbar, aber funktional für Entwicklung).
 
 ---
 
@@ -150,3 +184,16 @@ Wenn Terraform fertig ist, steht nur die leere Hülle (das Cluster). Die YAML-Da
 5.  **AWS ALB** sieht `/api`, leitet an **Backend Service** weiter.
 6.  **Backend Pod** (mit IAM Rolle aus `irsa.tf`) authentifiziert sich bei **DynamoDB** und holt Daten.
 7.  Antwort geht den Weg zurück.
+
+### 🎮 Matchmaking-Datenfluss (mit ElastiCache)
+1.  **User** klickt "Find Match" im Frontend.
+2.  **WebSocket** Nachricht `JOIN_QUEUE` geht an **Backend Pod A**.
+3.  **Backend Pod A** fügt Spieler zur **ElastiCache Valkey** Queue hinzu (`ZADD`).
+4.  **Backend Pod B** (oder A) führt Matchmaking aus:
+    *   Holt Distributed Lock (`SETNX`).
+    *   Prüft Queue auf 2+ Spieler.
+    *   Erstellt Match und speichert Game State in Redis.
+    *   Publiziert Match-Notification via **Pub/Sub**.
+5.  Beide Backend Pods erhalten Notification und senden `GAME_START` an ihre lokalen Clients.
+6.  **Game State** wird bei jedem Click atomar in Redis aktualisiert (`WATCH`/`MULTI`).
+7.  Nach Spielende werden Stats in **DynamoDB** persistiert.
