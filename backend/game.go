@@ -389,12 +389,24 @@ func (gm *GameManager) handleMatchNotification(match MatchNotification) {
 
 // sendGameStart sends the game start message to a player
 func (gm *GameManager) sendGameStart(client *Client, opponentID, role, roomID string) {
+	// Get initial game state from Redis
+	state, err := GetGameState(roomID)
+	if err != nil {
+		log.Printf("Failed to get game state for GAME_START: %v", err)
+		return
+	}
+
 	startMsg := GameMessage{
 		Type: MsgTypeGameStart,
 		Payload: map[string]interface{}{
-			"opponent": opponentID,
-			"role":     role,
-			"roomId":   roomID,
+			"opponent":      opponentID,
+			"role":          role,
+			"roomId":        roomID,
+			"timeRemaining": state.TimeRemaining,
+			"p1Score":       state.P1Score,
+			"p2Score":       state.P2Score,
+			"p1Name":        state.Player1Name,
+			"p2Name":        state.Player2Name,
 		},
 	}
 	bytes, _ := json.Marshal(startMsg)
@@ -406,7 +418,10 @@ func (gm *GameManager) sendGameStart(client *Client, opponentID, role, roomID st
 
 // runDistributedGameLoop runs the game timer and broadcasts state updates via Redis
 func (gm *GameManager) runDistributedGameLoop(roomID string) {
-	// Wait for countdown
+	// Broadcast initial state immediately so clients have game info during countdown
+	gm.broadcastGameState(roomID)
+
+	// Wait for countdown (5 seconds)
 	time.Sleep(5 * time.Second)
 
 	// Mark game as started

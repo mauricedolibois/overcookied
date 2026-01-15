@@ -73,6 +73,16 @@ export const useGameSocket = (user: UserSession | null) => {
         switch (msg.type) {
             case 'GAME_START':
                 setGameStatus('PLAYING');
+                // Set initial game state from GAME_START payload
+                if (msg.payload.timeRemaining !== undefined) {
+                    setGameState({
+                        timeRemaining: msg.payload.timeRemaining,
+                        p1Score: msg.payload.p1Score || 0,
+                        p2Score: msg.payload.p2Score || 0,
+                        p1Name: msg.payload.p1Name || '',
+                        p2Name: msg.payload.p2Name || '',
+                    });
+                }
                 break;
             case 'UPDATE':
                 setGameState((prev) => ({ ...prev, ...msg.payload }));
