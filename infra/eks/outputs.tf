@@ -57,3 +57,13 @@ output "ecr_login_command" {
   description = "Command to login to ECR"
   value       = "aws ecr get-login-password --region ${var.aws_region} | docker login --username AWS --password-stdin ${local.account_id}.dkr.ecr.${var.aws_region}.amazonaws.com"
 }
+
+output "valkey_endpoint" {
+  description = "ElastiCache Valkey endpoint"
+  value       = aws_elasticache_replication_group.valkey.primary_endpoint_address
+}
+
+output "valkey_port" {
+  description = "ElastiCache Valkey port"
+  value       = aws_elasticache_replication_group.valkey.port
+}

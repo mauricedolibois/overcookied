@@ -62,6 +62,13 @@ spec:
             secretKeyRef:
               name: jwt-secret
               key: JWT_SECRET
+        # Redis/Valkey endpoint for distributed matchmaking
+        - name: REDIS_ENDPOINT
+          valueFrom:
+            configMapKeyRef:
+              name: redis-config
+              key: REDIS_ENDPOINT
+              optional: true
         resources:
           requests:
             cpu: 100m

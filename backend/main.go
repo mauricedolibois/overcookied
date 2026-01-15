@@ -93,9 +93,22 @@ func main() {
 	// Initialize DB
 	db.Init()
 
+	// Initialize Redis/Valkey for distributed matchmaking
+	if err := InitRedis(); err != nil {
+		log.Printf("Warning: Redis not available, using in-memory matchmaking (single-pod mode)")
+	}
+
 	// Initialize Game Manager
 	gameManager := NewGameManager()
 	go gameManager.Run()
+
+	// Start matchmaking loop and event subscriptions if Redis is available
+	if IsRedisAvailable() {
+		go gameManager.RunMatchmakingLoop()
+		go gameManager.SubscribeToMatchNotifications()
+		go gameManager.SubscribeToGameEvents() // Subscribe to distributed game events
+		log.Println("Distributed matchmaking and game events enabled via Redis")
+	}
 
 	// Get port from environment or use default
 	port := os.Getenv("PORT")

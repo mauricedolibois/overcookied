@@ -48,6 +48,34 @@ Write-Host "🔑 Deploying OAuth ConfigMap..." -ForegroundColor Yellow
 kubectl apply -f "$PROJECT_ROOT\k8s\backend\oauth-configmap.yaml"
 Write-Host ""
 
+# Setup Redis/Valkey ConfigMap
+Write-Host "🔴 Setting up Redis/Valkey ConfigMap..." -ForegroundColor Yellow
+$valkeyEndpoint = ""
+try {
+    $valkeyEndpoint = (terraform -chdir="$PROJECT_ROOT\infra\eks" output -raw valkey_endpoint 2>$null)
+} catch {}
+
+if ($valkeyEndpoint) {
+    Write-Host "  ✅ Valkey endpoint found: $valkeyEndpoint" -ForegroundColor Green
+    $redisConfigMap = @"
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: redis-config
+  namespace: $NAMESPACE
+  labels:
+    app: overcookied
+    component: config
+data:
+  REDIS_ENDPOINT: "${valkeyEndpoint}:6379"
+"@
+    $redisConfigMap | kubectl apply -f -
+} else {
+    Write-Host "  ⚠️  Valkey not provisioned, using in-memory matchmaking" -ForegroundColor Yellow
+    kubectl apply -f "$PROJECT_ROOT\k8s\backend\redis-configmap.yaml"
+}
+Write-Host ""
+
 # Create or verify JWT Secret for token signing
 Write-Host "🔐 Setting up JWT Secret..." -ForegroundColor Yellow
 $jwtSecretExists = kubectl get secret jwt-secret -n $NAMESPACE 2>$null

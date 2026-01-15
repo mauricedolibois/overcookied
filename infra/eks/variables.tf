@@ -57,3 +57,9 @@ variable "dynamodb_table_games" {
   type        = string
   default     = "CookieGames"
 }
+
+variable "valkey_node_type" {
+  description = "ElastiCache Valkey node type"
+  type        = string
+  default     = "cache.t3.micro"
+}
