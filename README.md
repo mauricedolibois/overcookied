@@ -133,47 +133,6 @@ overcookied/
 └── scripts/            # Deployment automation
 ```
 
-## 🔒 Security
-
-✅ **Authentication**: Google OAuth 2.0 + JWT (HS256)  
-✅ **Secrets**: AWS Secrets Manager for OAuth credentials  
-✅ **IAM**: IRSA (no credentials in containers)  
-✅ **Network**: Security groups, ingress policies  
-✅ **TLS**: ALB with optional certificate support
-
-## 🎮 Features
-
-✅ Real-time 1v1 multiplayer matches  
-✅ Distributed matchmaking (100+ concurrent players)  
-✅ Golden Cookie special events  
-✅ Leaderboard with persistent rankings  
-✅ Game history tracking  
-✅ Google OAuth integration  
-✅ Horizontal auto-scaling (HPA)  
-✅ Mock mode for local development  
-
-## 🛠️ Customization
-
-### Change Cluster Size
-
-Edit `infra/eks/terraform.tfvars`:
-```hcl
-node_instance_types = ["t3.small"]     # Smaller instances
-node_desired_size   = 1                 # Fewer nodes
-```
-
-### Enable HTTPS
-
-1. Create ACM certificate in AWS Console
-2. Uncomment TLS section in `k8s/ingress.yaml`
-3. Update certificate ARN
-
-### Add Custom Domain
-
-1. Create Route53 hosted zone
-2. Update `k8s/ingress.yaml` with domain
-3. Add CNAME record to ALB DNS
-
 ## 📝 License
 
 MIT
