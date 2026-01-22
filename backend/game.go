@@ -11,6 +11,35 @@ import (
 	"github.com/mauricedolibois/overcookied/backend/db"
 )
 
+// toInt converts interface{} to int, handling both int and float64 types
+// This is needed because JSON unmarshaling produces float64, but in-memory mock passes int directly
+func toInt(v interface{}) int {
+	switch val := v.(type) {
+	case int:
+		return val
+	case float64:
+		return int(val)
+	case int64:
+		return int(val)
+	default:
+		return 0
+	}
+}
+
+// toFloat64 converts interface{} to float64, handling both int and float64 types
+func toFloat64(v interface{}) float64 {
+	switch val := v.(type) {
+	case float64:
+		return val
+	case int:
+		return float64(val)
+	case int64:
+		return float64(val)
+	default:
+		return 0
+	}
+}
+
 // Message Types
 const (
 	MsgTypeJoinQueue     = "JOIN_QUEUE"
@@ -39,6 +68,8 @@ type GameState struct {
 	P2Score       int    `json:"p2Score"`
 	P1Name        string `json:"p1Name"`
 	P2Name        string `json:"p2Name"`
+	P1Picture     string `json:"p1Picture"`
+	P2Picture     string `json:"p2Picture"`
 }
 
 type GameRoom struct {
@@ -204,18 +235,22 @@ func (gm *GameManager) handleDistributedGameMessage(client *Client, msg GameMess
 		}
 
 		// Atomically update score in Redis
-		_, err = AtomicScoreIncrement(roomID, client.userID, points)
+		updatedState, err := AtomicScoreIncrement(roomID, client.userID, points)
 		if err != nil {
 			log.Printf("Failed to increment score: %v", err)
 			return
 		}
 
-		// Publish click event to all pods
+		// Publish click event to all pods with updated scores
 		event := GameEvent{
 			RoomID:    roomID,
 			EventType: EventClick,
 			PlayerID:  client.userID,
-			Data:      map[string]interface{}{"points": float64(points)},
+			Data: map[string]interface{}{
+				"points":  float64(points),
+				"p1Score": float64(updatedState.P1Score),
+				"p2Score": float64(updatedState.P2Score),
+			},
 		}
 		PublishGameEvent(event)
 
@@ -407,6 +442,8 @@ func (gm *GameManager) sendGameStart(client *Client, opponentID, role, roomID st
 			"p2Score":       state.P2Score,
 			"p1Name":        state.Player1Name,
 			"p2Name":        state.Player2Name,
+			"p1Picture":     state.Player1Picture,
+			"p2Picture":     state.Player2Picture,
 		},
 	}
 	bytes, _ := json.Marshal(startMsg)
@@ -491,6 +528,8 @@ func (gm *GameManager) broadcastGameState(roomID string) {
 			"p2Score":       state.P2Score,
 			"p1Name":        state.Player1Name,
 			"p2Name":        state.Player2Name,
+			"p1Picture":     state.Player1Picture,
+			"p2Picture":     state.Player2Picture,
 		},
 	}
 	PublishGameEvent(event)
@@ -560,30 +599,30 @@ func (gm *GameManager) endDistributedGame(roomID string) {
 	}()
 }
 
-// persistGameStats saves game results to DynamoDB
+// persistGameStats saves game results to database (DynamoDB or mock)
 func (gm *GameManager) persistGameStats(state *DistributedGameState) {
 	timestamp := time.Now().Unix()
 	p1Won := state.P1Score > state.P2Score
 
 	// P1
-	db.SaveGame(db.CookieGame{
+	db.SaveGameWithMock(db.CookieGame{
 		GameID: state.RoomID, PlayerID: state.Player1ID, Timestamp: timestamp,
 		Score: state.P1Score, OpponentScore: state.P2Score,
 		Reason: "normal", Won: p1Won, WinnerID: state.WinnerID, Opponent: state.Player2ID,
 		PlayerName: state.Player1Name, PlayerPicture: state.Player1Picture,
 		OpponentName: state.Player2Name, OpponentPicture: state.Player2Picture,
 	})
-	db.UpdateUserStats(state.Player1ID, state.P1Score)
+	db.UpdateUserStatsWithMock(state.Player1ID, state.P1Score)
 
 	// P2
-	db.SaveGame(db.CookieGame{
+	db.SaveGameWithMock(db.CookieGame{
 		GameID: state.RoomID, PlayerID: state.Player2ID, Timestamp: timestamp,
 		Score: state.P2Score, OpponentScore: state.P1Score,
 		Reason: "normal", Won: !p1Won, WinnerID: state.WinnerID, Opponent: state.Player1ID,
 		PlayerName: state.Player2Name, PlayerPicture: state.Player2Picture,
 		OpponentName: state.Player1Name, OpponentPicture: state.Player1Picture,
 	})
-	db.UpdateUserStats(state.Player2ID, state.P2Score)
+	db.UpdateUserStatsWithMock(state.Player2ID, state.P2Score)
 }
 
 // SubscribeToGameEvents listens for game events from all pods
@@ -614,21 +653,31 @@ func (gm *GameManager) handleGameEvent(event GameEvent) {
 
 	switch event.EventType {
 	case EventStateUpdate:
+		p1Picture := ""
+		if pic, ok := event.Data["p1Picture"].(string); ok {
+			p1Picture = pic
+		}
+		p2Picture := ""
+		if pic, ok := event.Data["p2Picture"].(string); ok {
+			p2Picture = pic
+		}
 		msg = GameMessage{
 			Type: MsgTypeUpdate,
 			Payload: GameState{
-				TimeRemaining: int(event.Data["timeRemaining"].(float64)),
-				P1Score:       int(event.Data["p1Score"].(float64)),
-				P2Score:       int(event.Data["p2Score"].(float64)),
+				TimeRemaining: toInt(event.Data["timeRemaining"]),
+				P1Score:       toInt(event.Data["p1Score"]),
+				P2Score:       toInt(event.Data["p2Score"]),
 				P1Name:        event.Data["p1Name"].(string),
 				P2Name:        event.Data["p2Name"].(string),
+				P1Picture:     p1Picture,
+				P2Picture:     p2Picture,
 			},
 		}
 
 	case EventGoldenSpawn:
 		msg = GameMessage{
 			Type:    MsgTypeCookieSpawn,
-			Payload: map[string]float64{"x": event.Data["x"].(float64), "y": event.Data["y"].(float64)},
+			Payload: map[string]float64{"x": toFloat64(event.Data["x"]), "y": toFloat64(event.Data["y"])},
 		}
 
 	case EventGoldenClaim:
@@ -644,7 +693,7 @@ func (gm *GameManager) handleGameEvent(event GameEvent) {
 	case EventClick:
 		// Send opponent click notification only to the opponent
 		clickerID := event.PlayerID
-		points := int(event.Data["points"].(float64))
+		points := toInt(event.Data["points"])
 
 		for _, client := range localClients {
 			if client.userID != clickerID {
@@ -657,6 +706,24 @@ func (gm *GameManager) handleGameEvent(event GameEvent) {
 				case client.send <- bytes:
 				default:
 				}
+			}
+		}
+
+		// Send real-time score update to ALL players
+		p1Score := toInt(event.Data["p1Score"])
+		p2Score := toInt(event.Data["p2Score"])
+		scoreMsg := GameMessage{
+			Type: MsgTypeUpdate,
+			Payload: map[string]interface{}{
+				"p1Score": p1Score,
+				"p2Score": p2Score,
+			},
+		}
+		scoreBytes, _ := json.Marshal(scoreMsg)
+		for _, client := range localClients {
+			select {
+			case client.send <- scoreBytes:
+			default:
 			}
 		}
 		return // Don't send the generic message
@@ -831,24 +898,24 @@ func (room *GameRoom) EndGame() {
 		timestamp := time.Now().Unix()
 
 		// P1
-		db.SaveGame(db.CookieGame{
+		db.SaveGameWithMock(db.CookieGame{
 			GameID: room.ID, PlayerID: room.Player1.userID, Timestamp: timestamp,
 			Score: room.State.P1Score, OpponentScore: room.State.P2Score,
 			Reason: "normal", Won: p1Won, WinnerID: winnerID, Opponent: room.Player2.userID,
 			PlayerName: room.Player1.name, PlayerPicture: room.Player1.picture,
 			OpponentName: room.Player2.name, OpponentPicture: room.Player2.picture,
 		})
-		db.UpdateUserStats(room.Player1.userID, room.State.P1Score)
+		db.UpdateUserStatsWithMock(room.Player1.userID, room.State.P1Score)
 
 		// P2
-		db.SaveGame(db.CookieGame{
+		db.SaveGameWithMock(db.CookieGame{
 			GameID: room.ID, PlayerID: room.Player2.userID, Timestamp: timestamp,
 			Score: room.State.P2Score, OpponentScore: room.State.P1Score,
 			Reason: "normal", Won: !p1Won, WinnerID: winnerID, Opponent: room.Player1.userID,
 			PlayerName: room.Player2.name, PlayerPicture: room.Player2.picture,
 			OpponentName: room.Player1.name, OpponentPicture: room.Player1.picture,
 		})
-		db.UpdateUserStats(room.Player2.userID, room.State.P2Score)
+		db.UpdateUserStatsWithMock(room.Player2.userID, room.State.P2Score)
 	}()
 
 	room.Close <- true
@@ -886,6 +953,24 @@ func (room *GameRoom) HandleGameMessage(client *Client, msg GameMessage) {
 		oppBytes, _ := json.Marshal(oppMsg)
 		select {
 		case opponent.send <- oppBytes:
+		default:
+		}
+
+		// Send real-time score update to both players
+		scoreMsg := GameMessage{
+			Type: MsgTypeUpdate,
+			Payload: map[string]interface{}{
+				"p1Score": room.State.P1Score,
+				"p2Score": room.State.P2Score,
+			},
+		}
+		scoreBytes, _ := json.Marshal(scoreMsg)
+		select {
+		case room.Player1.send <- scoreBytes:
+		default:
+		}
+		select {
+		case room.Player2.send <- scoreBytes:
 		default:
 		}
 

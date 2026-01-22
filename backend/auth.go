@@ -181,6 +181,7 @@ func handleGoogleCallback(w http.ResponseWriter, r *http.Request) {
 	if frontendURL == "" {
 		frontendURL = "http://localhost:3000"
 	}
+	frontendURL = strings.TrimSuffix(frontendURL, "/")
 
 	// Get the expected state from the cookie
 	stateCookie, err := r.Cookie("oauth_state")
@@ -237,17 +238,17 @@ func handleGoogleCallback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// PERSIST USER in DynamoDB
+	// PERSIST USER in DynamoDB (or mock)
 	user := db.CookieUser{
 		UserID:  userInfo.ID,
 		Email:   userInfo.Email,
 		Name:    userInfo.Name,
 		Picture: userInfo.Picture,
 	}
-	if err := db.SaveUser(user); err != nil {
+	if err := db.SaveUserWithMock(user); err != nil {
 		log.Printf("[AUTH] WARNING: Failed to save user to DB: %v", err)
 	} else {
-		log.Printf("[AUTH] User saved to DynamoDB: %s", userInfo.Email)
+		log.Printf("[AUTH] User saved to database: %s", userInfo.Email)
 	}
 
 	log.Printf("[AUTH] JWT token generated successfully for user: %s", userInfo.Email)
@@ -402,6 +403,7 @@ func handleLogout(w http.ResponseWriter, r *http.Request) {
 	if frontendURL == "" {
 		frontendURL = "http://localhost:3000"
 	}
+	frontendURL = strings.TrimSuffix(frontendURL, "/")
 	w.Header().Set("Access-Control-Allow-Origin", frontendURL)
 	w.Header().Set("Access-Control-Allow-Credentials", "true")
 	w.Header().Set("Access-Control-Allow-Methods", "POST, OPTIONS")

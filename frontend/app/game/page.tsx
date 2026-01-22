@@ -177,18 +177,46 @@ export default function GamePage() {
             {/* Score Display */}
             <div className="flex gap-12 justify-center mb-10 text-xl">
               <div className="flex flex-col items-center">
-                <span className="font-bold text-gray-600 uppercase tracking-wider mb-2">You</span>
+                {/* Player Picture */}
+                {(gameState.role === 'p1' ? gameState.p1Picture : gameState.p2Picture) ? (
+                  <img 
+                    src={gameState.role === 'p1' ? gameState.p1Picture : gameState.p2Picture} 
+                    alt="You"
+                    className="w-16 h-16 rounded-full mb-2 border-4 border-[#FF6B4A]"
+                  />
+                ) : (
+                  <div className="w-16 h-16 rounded-full mb-2 bg-[#FF6B4A] flex items-center justify-center text-white text-2xl font-bold border-4 border-[#FF6B4A]">
+                    {(gameState.role === 'p1' ? gameState.p1Name : gameState.p2Name)?.charAt(0) || '?'}
+                  </div>
+                )}
+                <span className="font-bold text-gray-600 uppercase tracking-wider mb-2">
+                  {gameState.role === 'p1' ? gameState.p1Name : gameState.p2Name}
+                </span>
                 <div className={`text-6xl font-black ${gameState.winner === user.id ? 'text-[#FF6B4A]' : 'text-gray-700'}`}>
-                  {gameState.p1Name === user.id ? gameState.p1Score : gameState.p2Score}
+                  {gameState.role === 'p1' ? gameState.p1Score : gameState.p2Score}
                 </div>
               </div>
               <div className="flex flex-col items-center justify-center">
                 <span className="text-4xl font-bold text-gray-400">VS</span>
               </div>
               <div className="flex flex-col items-center">
-                <span className="font-bold text-gray-600 uppercase tracking-wider mb-2">Opponent</span>
+                {/* Opponent Picture */}
+                {(gameState.role === 'p1' ? gameState.p2Picture : gameState.p1Picture) ? (
+                  <img 
+                    src={gameState.role === 'p1' ? gameState.p2Picture : gameState.p1Picture} 
+                    alt="Opponent"
+                    className="w-16 h-16 rounded-full mb-2 border-4 border-gray-400"
+                  />
+                ) : (
+                  <div className="w-16 h-16 rounded-full mb-2 bg-gray-400 flex items-center justify-center text-white text-2xl font-bold border-4 border-gray-400">
+                    {(gameState.role === 'p1' ? gameState.p2Name : gameState.p1Name)?.charAt(0) || '?'}
+                  </div>
+                )}
+                <span className="font-bold text-gray-600 uppercase tracking-wider mb-2">
+                  {gameState.role === 'p1' ? gameState.p2Name : gameState.p1Name}
+                </span>
                 <div className="text-6xl font-black text-gray-500">
-                  {gameState.p1Name === user.id ? gameState.p2Score : gameState.p1Score}
+                  {gameState.role === 'p1' ? gameState.p2Score : gameState.p1Score}
                 </div>
               </div>
             </div>
@@ -209,11 +237,27 @@ export default function GamePage() {
         <div className="container mx-auto px-4 py-6 h-screen flex flex-col">
           {/* Header */}
           <div className="flex justify-between items-center bg-white/90 backdrop-blur rounded-2xl p-4 shadow-lg mb-8 relative z-20">
-            <div className="flex flex-col w-1/3">
-              <span className="text-sm font-bold text-gray-400 uppercase tracking-wider">You</span>
-              <span className="text-4xl font-black text-[#FF6B4A]">
-                {gameState.p1Name === user.id ? gameState.p1Score : gameState.p2Score}
-              </span>
+            <div className="flex items-center gap-3 w-1/3">
+              {/* Player Picture */}
+              {(gameState.role === 'p1' ? gameState.p1Picture : gameState.p2Picture) ? (
+                <img 
+                  src={gameState.role === 'p1' ? gameState.p1Picture : gameState.p2Picture} 
+                  alt="You"
+                  className="w-10 h-10 rounded-full border-2 border-[#FF6B4A]"
+                />
+              ) : (
+                <div className="w-10 h-10 rounded-full bg-[#FF6B4A] flex items-center justify-center text-white font-bold border-2 border-[#FF6B4A]">
+                  {(gameState.role === 'p1' ? gameState.p1Name : gameState.p2Name)?.charAt(0) || '?'}
+                </div>
+              )}
+              <div className="flex flex-col">
+                <span className="text-sm font-bold text-gray-400 uppercase tracking-wider">
+                  {gameState.role === 'p1' ? gameState.p1Name : gameState.p2Name}
+                </span>
+                <span className="text-4xl font-black text-[#FF6B4A]">
+                  {gameState.role === 'p1' ? gameState.p1Score : gameState.p2Score}
+                </span>
+              </div>
             </div>
 
             <div className="flex flex-col items-center w-1/3">
@@ -228,11 +272,27 @@ export default function GamePage() {
               </button>
             </div>
 
-            <div className="flex flex-col items-end w-1/3">
-              <span className="text-sm font-bold text-gray-400 uppercase tracking-wider">Opponent</span>
-              <span className="text-4xl font-black text-gray-600">
-                {gameState.p1Name === user.id ? gameState.p2Score : gameState.p1Score}
-              </span>
+            <div className="flex items-center justify-end gap-3 w-1/3">
+              <div className="flex flex-col items-end">
+                <span className="text-sm font-bold text-gray-400 uppercase tracking-wider">
+                  {gameState.role === 'p1' ? gameState.p2Name : gameState.p1Name}
+                </span>
+                <span className="text-4xl font-black text-gray-600">
+                  {gameState.role === 'p1' ? gameState.p2Score : gameState.p1Score}
+                </span>
+              </div>
+              {/* Opponent Picture */}
+              {(gameState.role === 'p1' ? gameState.p2Picture : gameState.p1Picture) ? (
+                <img 
+                  src={gameState.role === 'p1' ? gameState.p2Picture : gameState.p1Picture} 
+                  alt="Opponent"
+                  className="w-10 h-10 rounded-full border-2 border-gray-400"
+                />
+              ) : (
+                <div className="w-10 h-10 rounded-full bg-gray-400 flex items-center justify-center text-white font-bold border-2 border-gray-400">
+                  {(gameState.role === 'p1' ? gameState.p2Name : gameState.p1Name)?.charAt(0) || '?'}
+                </div>
+              )}
             </div>
           </div>
 

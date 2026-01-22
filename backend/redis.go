@@ -8,6 +8,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/mauricedolibois/overcookied/backend/mocks"
 	"github.com/redis/go-redis/v9"
 )
 
@@ -29,9 +30,10 @@ type MatchNotification struct {
 }
 
 var (
-	redisClient *redis.Client
-	ctx         = context.Background()
-	podID       string
+	redisClient  *redis.Client
+	ctx          = context.Background()
+	podID        string
+	useMockRedis bool
 )
 
 const (
@@ -43,6 +45,15 @@ const (
 
 // InitRedis initializes the Redis/Valkey connection
 func InitRedis() error {
+	// Check if we should use mocks
+	useMockRedis = mocks.IsMockMode()
+
+	if useMockRedis {
+		log.Println("[REDIS] Running in MOCK MODE - using in-memory matchmaking")
+		podID = mocks.GetMockRedis().GetPodID()
+		return nil
+	}
+
 	redisAddr := os.Getenv("REDIS_ENDPOINT")
 	if redisAddr == "" {
 		redisAddr = "localhost:6379" // Default for local dev
@@ -75,6 +86,10 @@ func InitRedis() error {
 
 // AddToQueue adds a player to the matchmaking queue
 func AddToQueue(client *Client) error {
+	if useMockRedis {
+		return mocks.GetMockRedis().AddToQueue(client.userID, client.name, client.picture)
+	}
+
 	if redisClient == nil {
 		return fmt.Errorf("redis not initialized")
 	}
@@ -108,6 +123,10 @@ func AddToQueue(client *Client) error {
 
 // RemoveFromQueue removes a player from the matchmaking queue
 func RemoveFromQueue(userID string) error {
+	if useMockRedis {
+		return mocks.GetMockRedis().RemoveFromQueue(userID)
+	}
+
 	if redisClient == nil {
 		return fmt.Errorf("redis not initialized")
 	}
@@ -136,6 +155,28 @@ func RemoveFromQueue(userID string) error {
 // TryMatchmaking attempts to find a match for players in the queue
 // Returns matched player entries if found, nil otherwise
 func TryMatchmaking() (*QueueEntry, *QueueEntry, error) {
+	if useMockRedis {
+		matched, err := mocks.GetMockRedis().TryMatch()
+		if err != nil || matched == nil || len(matched) < 2 {
+			return nil, nil, err
+		}
+		p1 := QueueEntry{
+			UserID:   matched[0].UserID,
+			Name:     matched[0].Name,
+			Picture:  matched[0].Picture,
+			PodID:    matched[0].PodID,
+			JoinedAt: matched[0].JoinedAt,
+		}
+		p2 := QueueEntry{
+			UserID:   matched[1].UserID,
+			Name:     matched[1].Name,
+			Picture:  matched[1].Picture,
+			PodID:    matched[1].PodID,
+			JoinedAt: matched[1].JoinedAt,
+		}
+		return &p1, &p2, nil
+	}
+
 	if redisClient == nil {
 		return nil, nil, fmt.Errorf("redis not initialized")
 	}
@@ -175,6 +216,15 @@ func TryMatchmaking() (*QueueEntry, *QueueEntry, error) {
 
 // PublishMatchNotification publishes a match notification to all pods
 func PublishMatchNotification(match MatchNotification) error {
+	if useMockRedis {
+		return mocks.GetMockRedis().PublishMatch(mocks.MatchNotification{
+			Player1ID: match.Player1ID,
+			Player2ID: match.Player2ID,
+			RoomID:    match.RoomID,
+			HostPodID: match.HostPodID,
+		})
+	}
+
 	if redisClient == nil {
 		return fmt.Errorf("redis not initialized")
 	}
@@ -189,6 +239,20 @@ func PublishMatchNotification(match MatchNotification) error {
 
 // SubscribeToMatches subscribes to match notifications
 func SubscribeToMatches(handler func(MatchNotification)) {
+	if useMockRedis {
+		ch := mocks.GetMockRedis().Subscribe()
+		go func() {
+			for msg := range ch {
+				var match MatchNotification
+				if err := json.Unmarshal([]byte(msg), &match); err != nil {
+					continue
+				}
+				handler(match)
+			}
+		}()
+		return
+	}
+
 	if redisClient == nil {
 		log.Println("Redis not available, skipping match subscription")
 		return
@@ -207,8 +271,13 @@ func SubscribeToMatches(handler func(MatchNotification)) {
 	}
 }
 
-// IsRedisAvailable returns true if Redis is connected and available
+// IsRedisAvailable returns true if Redis is connected and available (or mock mode is enabled)
 func IsRedisAvailable() bool {
+	// Mock mode is always "available"
+	if useMockRedis {
+		return true
+	}
+
 	if redisClient == nil {
 		return false
 	}
@@ -270,12 +339,8 @@ const (
 	EventPlayerQuit  = "PLAYER_QUIT"
 )
 
-// CreateDistributedGame creates a new game in Redis
+// CreateDistributedGame creates a new game in Redis or mock store
 func CreateDistributedGame(roomID string, p1, p2 *QueueEntry) error {
-	if redisClient == nil {
-		return fmt.Errorf("redis not initialized")
-	}
-
 	state := DistributedGameState{
 		RoomID:             roomID,
 		Player1ID:          p1.UserID,
@@ -297,8 +362,32 @@ func CreateDistributedGame(roomID string, p1, p2 *QueueEntry) error {
 	return SaveGameState(&state)
 }
 
-// SaveGameState saves the game state to Redis
+// SaveGameState saves the game state to Redis or mock store
 func SaveGameState(state *DistributedGameState) error {
+	if useMockRedis {
+		mockState := &mocks.GameState{
+			RoomID:             state.RoomID,
+			Player1ID:          state.Player1ID,
+			Player2ID:          state.Player2ID,
+			Player1Name:        state.Player1Name,
+			Player2Name:        state.Player2Name,
+			Player1Picture:     state.Player1Picture,
+			Player2Picture:     state.Player2Picture,
+			P1Score:            state.P1Score,
+			P2Score:            state.P2Score,
+			TimeRemaining:      state.TimeRemaining,
+			GoldenCookieActive: state.GoldenCookieActive,
+			GoldenCookieX:      state.GoldenCookieX,
+			GoldenCookieY:      state.GoldenCookieY,
+			DoubleClickExpiry:  state.DoubleClickExpiry,
+			GameStarted:        state.GameStarted,
+			GameEnded:          state.GameEnded,
+			WinnerID:           state.WinnerID,
+			TimerPodID:         state.TimerPodID,
+		}
+		return mocks.GetMockGameStore().SaveGameState(mockState)
+	}
+
 	if redisClient == nil {
 		return fmt.Errorf("redis not initialized")
 	}
@@ -312,8 +401,35 @@ func SaveGameState(state *DistributedGameState) error {
 	return redisClient.Set(ctx, key, string(stateJSON), gameStateTTL).Err()
 }
 
-// GetGameState retrieves the game state from Redis
+// GetGameState retrieves the game state from Redis or mock store
 func GetGameState(roomID string) (*DistributedGameState, error) {
+	if useMockRedis {
+		mockState, err := mocks.GetMockGameStore().GetGameState(roomID)
+		if err != nil || mockState == nil {
+			return nil, err
+		}
+		return &DistributedGameState{
+			RoomID:             mockState.RoomID,
+			Player1ID:          mockState.Player1ID,
+			Player2ID:          mockState.Player2ID,
+			Player1Name:        mockState.Player1Name,
+			Player2Name:        mockState.Player2Name,
+			Player1Picture:     mockState.Player1Picture,
+			Player2Picture:     mockState.Player2Picture,
+			P1Score:            mockState.P1Score,
+			P2Score:            mockState.P2Score,
+			TimeRemaining:      mockState.TimeRemaining,
+			GoldenCookieActive: mockState.GoldenCookieActive,
+			GoldenCookieX:      mockState.GoldenCookieX,
+			GoldenCookieY:      mockState.GoldenCookieY,
+			DoubleClickExpiry:  mockState.DoubleClickExpiry,
+			GameStarted:        mockState.GameStarted,
+			GameEnded:          mockState.GameEnded,
+			WinnerID:           mockState.WinnerID,
+			TimerPodID:         mockState.TimerPodID,
+		}, nil
+	}
+
 	if redisClient == nil {
 		return nil, fmt.Errorf("redis not initialized")
 	}
@@ -332,8 +448,12 @@ func GetGameState(roomID string) (*DistributedGameState, error) {
 	return &state, nil
 }
 
-// DeleteGameState removes the game state from Redis
+// DeleteGameState removes the game state from Redis or mock store
 func DeleteGameState(roomID string) error {
+	if useMockRedis {
+		return mocks.GetMockGameStore().DeleteGameState(roomID)
+	}
+
 	if redisClient == nil {
 		return fmt.Errorf("redis not initialized")
 	}
@@ -344,6 +464,15 @@ func DeleteGameState(roomID string) error {
 
 // PublishGameEvent publishes a game event to all pods
 func PublishGameEvent(event GameEvent) error {
+	if useMockRedis {
+		return mocks.GetMockGameStore().PublishGameEvent(mocks.GameEvent{
+			RoomID:    event.RoomID,
+			EventType: event.EventType,
+			PlayerID:  event.PlayerID,
+			Data:      event.Data,
+		})
+	}
+
 	if redisClient == nil {
 		return fmt.Errorf("redis not initialized")
 	}
@@ -358,6 +487,22 @@ func PublishGameEvent(event GameEvent) error {
 
 // SubscribeToGameEvents subscribes to game events from all pods
 func SubscribeToGameEvents(handler func(GameEvent)) {
+	if useMockRedis {
+		ch := mocks.GetMockGameStore().SubscribeToGameEvents()
+		go func() {
+			for mockEvent := range ch {
+				event := GameEvent{
+					RoomID:    mockEvent.RoomID,
+					EventType: mockEvent.EventType,
+					PlayerID:  mockEvent.PlayerID,
+					Data:      mockEvent.Data,
+				}
+				handler(event)
+			}
+		}()
+		return
+	}
+
 	if redisClient == nil {
 		log.Println("Redis not available, skipping game event subscription")
 		return
@@ -378,6 +523,42 @@ func SubscribeToGameEvents(handler func(GameEvent)) {
 
 // AtomicScoreIncrement atomically increments a player's score
 func AtomicScoreIncrement(roomID, playerID string, points int) (*DistributedGameState, error) {
+	if useMockRedis {
+		mockState, err := mocks.GetMockGameStore().GetGameState(roomID)
+		if err != nil || mockState == nil {
+			return nil, fmt.Errorf("game not found: %s", roomID)
+		}
+
+		if playerID == mockState.Player1ID {
+			mockState.P1Score += points
+		} else if playerID == mockState.Player2ID {
+			mockState.P2Score += points
+		}
+
+		mocks.GetMockGameStore().SaveGameState(mockState)
+
+		return &DistributedGameState{
+			RoomID:             mockState.RoomID,
+			Player1ID:          mockState.Player1ID,
+			Player2ID:          mockState.Player2ID,
+			Player1Name:        mockState.Player1Name,
+			Player2Name:        mockState.Player2Name,
+			Player1Picture:     mockState.Player1Picture,
+			Player2Picture:     mockState.Player2Picture,
+			P1Score:            mockState.P1Score,
+			P2Score:            mockState.P2Score,
+			TimeRemaining:      mockState.TimeRemaining,
+			GoldenCookieActive: mockState.GoldenCookieActive,
+			GoldenCookieX:      mockState.GoldenCookieX,
+			GoldenCookieY:      mockState.GoldenCookieY,
+			DoubleClickExpiry:  mockState.DoubleClickExpiry,
+			GameStarted:        mockState.GameStarted,
+			GameEnded:          mockState.GameEnded,
+			WinnerID:           mockState.WinnerID,
+			TimerPodID:         mockState.TimerPodID,
+		}, nil
+	}
+
 	if redisClient == nil {
 		return nil, fmt.Errorf("redis not initialized")
 	}
@@ -425,6 +606,25 @@ func AtomicScoreIncrement(roomID, playerID string, points int) (*DistributedGame
 
 // AtomicClaimGoldenCookie atomically claims the golden cookie
 func AtomicClaimGoldenCookie(roomID, playerID string) (bool, error) {
+	if useMockRedis {
+		mockState, err := mocks.GetMockGameStore().GetGameState(roomID)
+		if err != nil || mockState == nil {
+			return false, fmt.Errorf("game not found: %s", roomID)
+		}
+
+		if !mockState.GoldenCookieActive {
+			return false, nil
+		}
+
+		mockState.GoldenCookieActive = false
+		if mockState.DoubleClickExpiry == nil {
+			mockState.DoubleClickExpiry = make(map[string]int64)
+		}
+		mockState.DoubleClickExpiry[playerID] = time.Now().Add(3 * time.Second).Unix()
+		mocks.GetMockGameStore().SaveGameState(mockState)
+		return true, nil
+	}
+
 	if redisClient == nil {
 		return false, fmt.Errorf("redis not initialized")
 	}

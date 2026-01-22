@@ -6,7 +6,6 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
-	"github.com/mauricedolibois/overcookied/backend/db"
 )
 
 const (
@@ -107,24 +106,32 @@ func serveWs(manager *GameManager, w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Simply using query param for ID now, later use JWT from Auth
-	userID := r.URL.Query().Get("userId")
-	if userID == "" {
-		userID = "anon_" + time.Now().String() // temp fallback
+	// Authenticate using JWT token from query parameter
+	tokenString := r.URL.Query().Get("token")
+	if tokenString == "" {
+		log.Println("[WS] ERROR: No token provided for WebSocket connection")
+		conn.WriteMessage(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.CloseNormalClosure, "authentication required"))
+		conn.Close()
+		return
 	}
 
+	// Verify JWT token
+	claims, err := verifyJWT(tokenString)
+	if err != nil {
+		log.Printf("[WS] ERROR: Invalid JWT token: %v", err)
+		conn.WriteMessage(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.CloseNormalClosure, "invalid token"))
+		conn.Close()
+		return
+	}
+
+	userID := claims.UserID
 	client := &Client{manager: manager, conn: conn, send: make(chan []byte, 256), userID: userID}
 
-	// Fetch User Details from DB
-	user, err := db.GetUser(userID)
-	if err == nil && user != nil {
-		client.name = user.Name
-		client.picture = user.Picture
-	} else {
-		// Fallback for guests or missing users
-		client.name = "Guest " + userID[:4]
-		client.picture = "" // handled by frontend
-	}
+	// Use claims data directly - already verified
+	client.name = claims.Name
+	client.picture = claims.Picture
+
+	log.Printf("[WS] Authenticated user connected: %s (%s)", client.name, userID)
 
 	client.manager.register <- client
 

@@ -298,3 +298,20 @@ func GetGameHistory(userID string, limit int32) ([]CookieGame, error) {
 
 	return games, nil
 }
+
+// CountGamesByPlayer returns the total number of games for a player
+func CountGamesByPlayer(userID string) (int, error) {
+	out, err := svc.Query(context.TODO(), &dynamodb.QueryInput{
+		TableName:              aws.String(TableGames),
+		IndexName:              aws.String("PlayerHistoryIndex"),
+		KeyConditionExpression: aws.String("PlayerID = :pid"),
+		ExpressionAttributeValues: map[string]types.AttributeValue{
+			":pid": &types.AttributeValueMemberS{Value: userID},
+		},
+		Select: types.SelectCount,
+	})
+	if err != nil {
+		return 0, err
+	}
+	return int(out.Count), nil
+}
