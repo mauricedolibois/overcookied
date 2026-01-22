@@ -6,19 +6,21 @@ Overcookied is a real-time multiplayer competitive clicker game. Players compete
 ## 2. Tech Stack
 
 ### Frontend
-- **Framework**: [Next.js](https://nextjs.org/) (React) with App Router.
-- **Styling**: [Tailwind CSS](https://tailwindcss.com/) for responsive and utility-first styling.
-- **Language**: TypeScript.
-- **State Management**: React Hooks (`useState`, `useEffect`) + Custom Hooks (`useGameSocket`).
-- **Communication**: WebSockets (native browser API).
+- **Framework**: Next.js 16.0.3 (React 19) with App Router
+- **Styling**: Tailwind CSS 4.0 for responsive and utility-first styling
+- **Language**: TypeScript 5.x
+- **State Management**: React Hooks (`useState`, `useEffect`) + Custom Hooks (`useGameSocket`)
+- **Communication**: WebSockets (native browser API) with JWT authentication
+- **Node.js**: 20.x
 
 ### Backend
-- **Language**: Go (Golang).
-- **Web Server**: Standard `net/http`.
-- **WebSockets**: [gorilla/websocket](https://github.com/gorilla/websocket).
-- **Database**: AWS DynamoDB.
-- **Cache/State Store**: AWS ElastiCache (Valkey 8.0) for distributed matchmaking and game state.
-- **Authentication**: Google OAuth 2.0 + JWT (JSON Web Tokens).
+- **Language**: Go 1.24.9
+- **Web Server**: Standard `net/http`
+- **WebSockets**: [gorilla/websocket](https://github.com/gorilla/websocket) v1.5.3
+- **Database**: AWS DynamoDB (serverless)
+- **Cache/State Store**: AWS ElastiCache (Valkey 8.0) for distributed matchmaking and game state
+- **Authentication**: Google OAuth 2.0 + JWT (JSON Web Tokens)
+- **Security**: IRSA (IAM Roles for Service Accounts) for DynamoDB access in Kubernetes
 
 ## 3. Project Structure
 

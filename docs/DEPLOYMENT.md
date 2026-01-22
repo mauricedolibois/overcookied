@@ -2,19 +2,15 @@
 
 This guide walks you through deploying the Overcookied game application to AWS EKS using the 2-layer Terraform architecture.
 
-## Architecture Overview
-
-- **Base Layer** (`infra/base`): Persistent infrastructure (VPC, ECR)
-- **EKS Layer** (`infra/eks`): Ephemeral EKS cluster and node groups
-- **Kubernetes** (`k8s/`): Application manifests (Backend, Frontend, Ingress)
-
 ## Prerequisites
 
-✅ **AWS CLI** (v2.x) - configured with credentials
-✅ **Terraform** (v1.9+)
-✅ **kubectl** (v1.30+)
-✅ **Docker** - for building container images
-✅ **helm** (v3.16+) - for AWS Load Balancer Controller
+✅ **AWS CLI** (v2.x) - configured with credentials  
+✅ **Terraform** (v1.9+)  
+✅ **kubectl** (v1.30+)  
+✅ **Docker** - for building container images  
+✅ **helm** (v3.16+) - for AWS Load Balancer Controller  
+✅ **Go** (1.24.9+) - for building backend  
+✅ **Node.js** (20.x) - for building frontend
 
 ### Verify Prerequisites
 
@@ -24,7 +20,45 @@ terraform --version
 kubectl version --client
 docker --version
 helm version
+go version
+node --version
 ```
+
+## Architecture Overview
+
+The deployment uses a **2-layer Terraform architecture**:
+
+- **Base Layer** (`infra/base`): Persistent infrastructure
+  - VPC with public/private subnets across 3 AZs
+  - ECR repositories (backend & frontend)
+  - **Destroyed manually only** - survives cluster recreations
+
+- **EKS Layer** (`infra/eks`): Ephemeral cluster infrastructure
+  - EKS cluster with managed node groups
+  - ElastiCache (Valkey 8.0) for distributed matchmaking
+  - ALB Ingress Controller via Helm
+  - DynamoDB access via IRSA (IAM Roles for Service Accounts)
+  - **Can be destroyed and recreated** to save costs
+
+- **Kubernetes** (`k8s/`): Application manifests
+  - Backend deployment (2 replicas), service, HPA
+  - Frontend deployment (1 replica), service
+  - ALB ingress with HTTPS redirect
+  - ConfigMaps for OAuth and Redis config
+
+## Cost Estimate
+
+**Base Layer** (persistent): ~€20-30/month
+- VPC, subnets, NAT Gateway (1 per AZ: €32-48/month for 3 AZs = avoid!)
+- ECR repositories: minimal
+
+**EKS Layer** (ephemeral): ~€50-70/month
+- EKS cluster: €0.10/hour (~€75/month)
+- EC2 nodes (2x t3.medium): ~€30/month
+- ElastiCache (t3.small, 1GB): ~€25/month
+- ALB: ~€16/month
+
+**Total Cluster**: ~€70-90/month
 
 ## Phase 0: Bootstrap (ONE-TIME SETUP)
 

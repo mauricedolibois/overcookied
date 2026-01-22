@@ -1,20 +1,23 @@
 # Overcookied WebSocket Architecture
 
-This document details the real-time communication architecture used in Overcookied, built with Go (`gorilla/websocket`) and React.
+This document details the real-time communication architecture used in Overcookied, built with Go (`gorilla/websocket` v1.5.3) and React 19 (Next.js 16).
 
 ## 1. Connection Lifecycle
 
 ### 1.1 Handshake & Upgrade
-1.  **Client Request**: The frontend connects to `ws://DOMAIN/ws?userId=123`.
+1.  **Client Request**: The frontend connects to `ws://DOMAIN/ws?token=JWT_TOKEN`.
 2.  **Handler**: The request hits `serveWs` in `backend/websocket.go`.
-3.  **Upgrade**: The standard HTTP connection is upgraded to a persistent TCP WebSocket connection using `upgrader.Upgrade()`.
-4.  **Client Initialization**: A `Client` struct is created to represent this connection.
+3.  **JWT Validation**: The token is extracted and validated before upgrade.
+4.  **Upgrade**: The standard HTTP connection is upgraded to a persistent TCP WebSocket connection using `upgrader.Upgrade()`.
+5.  **Client Initialization**: A `Client` struct is created to represent this connection.
     ```go
     type Client struct {
         manager *GameManager
         conn    *websocket.Conn
         send    chan []byte  // Buffered channel for outgoing messages
         userID  string
+        name    string
+        picture string
     }
     ```
 
@@ -24,14 +27,16 @@ To handle concurrent reads and writes safely, we use the Go concurrency pattern 
 #### A. Read Pump (`readPump`)
 *   **Responsibility**: Reads *incoming* messages from the browser.
 *   **Mechanism**: Runs a loop blocking on `conn.ReadMessage()`.
-*   **Routing**: When a message arrives (e.g., `{"type": "CLICK"}`), it doesn't process it. It passes it to the central `GameManager` via a channel (`c.manager.handleMessage`).
+*   **Routing**: When a message arrives (e.g., `{"type": "CLICK"}`), it passes it to the central `GameManager` via `handleMessage()`.
 *   **Cleanup**: On read error (disconnect), it unregisters the client and closes the socket.
+*   **Timeouts**: Enforces read deadlines and pong timeouts (60 seconds).
 
 #### B. Write Pump (`writePump`)
 *   **Responsibility**: Push *outgoing* messages to the browser.
 *   **Mechanism**: Runs a `select` loop listening on the `client.send` channel.
 *   **Motivation**: Ensures only *one* goroutine ever writes to the socket, preventing race conditions. Other parts of the app (Game Loop, Timers) simply push data to the `send` channel without worrying about the socket state.
-*   **Heartbeat**: Also manages a `Ticker` to send `Ping` control frames to keep the connection alive through load balancers/proxies.
+*   **Heartbeat**: Also manages a `Ticker` to send `Ping` control frames every ~54 seconds to keep the connection alive through load balancers/proxies.
+*   **Write Timeout**: Enforces 10-second write deadlines for outgoing messages.
 
 ## 2. Message Routing Architecture
 
