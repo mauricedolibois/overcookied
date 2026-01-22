@@ -13,6 +13,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/aws/aws-sdk-go-v2/config"
+	"github.com/aws/aws-sdk-go-v2/service/secretsmanager"
 	"github.com/mauricedolibois/overcookied/backend/db"
 
 	"github.com/golang-jwt/jwt/v5"
@@ -22,9 +24,15 @@ import (
 
 var (
 	googleOauthConfig *oauth2.Config
-	oauthStateString  string
 	jwtSecret         []byte
 )
+
+// generateOAuthState creates a unique state string for CSRF protection
+func generateOAuthState() string {
+	b := make([]byte, 32)
+	rand.Read(b)
+	return base64.URLEncoding.EncodeToString(b)
+}
 
 type UserSession struct {
 	ID      string `json:"id"`
@@ -53,17 +61,66 @@ type GoogleUserInfo struct {
 	Locale        string `json:"locale"`
 }
 
+// OAuthSecrets represents the structure of OAuth credentials stored in AWS Secrets Manager
+type OAuthSecrets struct {
+	ClientID     string `json:"client_id"`
+	ClientSecret string `json:"client_secret"`
+}
+
+// fetchOAuthFromSecretsManager fetches OAuth credentials from AWS Secrets Manager
+func fetchOAuthFromSecretsManager() (clientID, clientSecret string, err error) {
+	secretName := os.Getenv("GOOGLE_OAUTH_SECRET_NAME")
+	if secretName == "" {
+		return "", "", fmt.Errorf("GOOGLE_OAUTH_SECRET_NAME not set")
+	}
+
+	log.Printf("[AUTH] Fetching OAuth credentials from AWS Secrets Manager: %s", secretName)
+
+	cfg, err := config.LoadDefaultConfig(context.Background())
+	if err != nil {
+		return "", "", fmt.Errorf("failed to load AWS config: %w", err)
+	}
+
+	client := secretsmanager.NewFromConfig(cfg)
+	input := &secretsmanager.GetSecretValueInput{
+		SecretId: &secretName,
+	}
+
+	result, err := client.GetSecretValue(context.Background(), input)
+	if err != nil {
+		return "", "", fmt.Errorf("failed to get secret: %w", err)
+	}
+
+	var secrets OAuthSecrets
+	if err := json.Unmarshal([]byte(*result.SecretString), &secrets); err != nil {
+		return "", "", fmt.Errorf("failed to parse secret: %w", err)
+	}
+
+	log.Printf("[AUTH] Successfully fetched OAuth credentials from Secrets Manager")
+	return secrets.ClientID, secrets.ClientSecret, nil
+}
+
 func initOAuth() {
 	clientID := os.Getenv("GOOGLE_CLIENT_ID")
 	clientSecret := os.Getenv("GOOGLE_CLIENT_SECRET")
 	redirectURL := os.Getenv("GOOGLE_REDIRECT_URL")
 
-	// Validate required OAuth credentials
-	if clientID == "" || clientID == "your_google_client_id_here" {
-		log.Fatal("ERROR: GOOGLE_CLIENT_ID is not set or is still using placeholder value. Please set it in your .env file.")
+	// If credentials not in env vars, try AWS Secrets Manager
+	if clientID == "" || clientID == "your_google_client_id_here" || clientSecret == "" || clientSecret == "your_google_client_secret_here" {
+		log.Println("[AUTH] OAuth credentials not found in environment variables, trying AWS Secrets Manager...")
+		var err error
+		clientID, clientSecret, err = fetchOAuthFromSecretsManager()
+		if err != nil {
+			log.Fatalf("ERROR: Failed to fetch OAuth credentials from Secrets Manager: %v. Please set GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET environment variables or configure AWS Secrets Manager.", err)
+		}
 	}
-	if clientSecret == "" || clientSecret == "your_google_client_secret_here" {
-		log.Fatal("ERROR: GOOGLE_CLIENT_SECRET is not set or is still using placeholder value. Please set it in your .env file.")
+
+	// Validate required OAuth credentials
+	if clientID == "" {
+		log.Fatal("ERROR: GOOGLE_CLIENT_ID is not set or is still using placeholder value.")
+	}
+	if clientSecret == "" {
+		log.Fatal("ERROR: GOOGLE_CLIENT_SECRET is not set or is still using placeholder value.")
 	}
 
 	if redirectURL == "" {
@@ -83,11 +140,6 @@ func initOAuth() {
 		Endpoint: google.Endpoint,
 	}
 
-	// Generate random state string
-	b := make([]byte, 32)
-	rand.Read(b)
-	oauthStateString = base64.URLEncoding.EncodeToString(b)
-
 	// Initialize JWT secret
 	jwtSecretStr := os.Getenv("JWT_SECRET")
 	if jwtSecretStr == "" {
@@ -103,7 +155,22 @@ func initOAuth() {
 
 func handleGoogleLogin(w http.ResponseWriter, r *http.Request) {
 	log.Printf("[AUTH] Google OAuth login initiated from IP: %s", r.RemoteAddr)
-	url := googleOauthConfig.AuthCodeURL(oauthStateString, oauth2.AccessTypeOffline)
+
+	// Generate a unique state for this request
+	state := generateOAuthState()
+
+	// Store state in a cookie (works across multiple replicas)
+	http.SetCookie(w, &http.Cookie{
+		Name:     "oauth_state",
+		Value:    state,
+		Path:     "/",
+		MaxAge:   300, // 5 minutes
+		HttpOnly: true,
+		Secure:   strings.HasPrefix(os.Getenv("GOOGLE_REDIRECT_URL"), "https://"),
+		SameSite: http.SameSiteLaxMode,
+	})
+
+	url := googleOauthConfig.AuthCodeURL(state, oauth2.AccessTypeOffline)
 	log.Printf("[AUTH] Redirecting to Google OAuth URL")
 	http.Redirect(w, r, url, http.StatusTemporaryRedirect)
 }
@@ -114,10 +181,29 @@ func handleGoogleCallback(w http.ResponseWriter, r *http.Request) {
 	if frontendURL == "" {
 		frontendURL = "http://localhost:3000"
 	}
+	frontendURL = strings.TrimSuffix(frontendURL, "/")
+
+	// Get the expected state from the cookie
+	stateCookie, err := r.Cookie("oauth_state")
+	if err != nil {
+		log.Printf("[AUTH] ERROR: OAuth state cookie not found: %v", err)
+		http.Redirect(w, r, fmt.Sprintf("%s/login?error=invalid_state", frontendURL), http.StatusTemporaryRedirect)
+		return
+	}
+	expectedState := stateCookie.Value
+
+	// Clear the state cookie
+	http.SetCookie(w, &http.Cookie{
+		Name:     "oauth_state",
+		Value:    "",
+		Path:     "/",
+		MaxAge:   -1,
+		HttpOnly: true,
+	})
 
 	state := r.FormValue("state")
-	if state != oauthStateString {
-		log.Printf("[AUTH] ERROR: Invalid OAuth state - potential CSRF attack from IP: %s", r.RemoteAddr)
+	if state != expectedState {
+		log.Printf("[AUTH] ERROR: Invalid OAuth state - potential CSRF attack from IP: %s (expected: %s, got: %s)", r.RemoteAddr, expectedState[:10], state[:10])
 		http.Redirect(w, r, fmt.Sprintf("%s/login?error=invalid_state", frontendURL), http.StatusTemporaryRedirect)
 		return
 	}
@@ -152,17 +238,17 @@ func handleGoogleCallback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// PERSIST USER in DynamoDB
+	// PERSIST USER in DynamoDB (or mock)
 	user := db.CookieUser{
 		UserID:  userInfo.ID,
 		Email:   userInfo.Email,
 		Name:    userInfo.Name,
 		Picture: userInfo.Picture,
 	}
-	if err := db.SaveUser(user); err != nil {
+	if err := db.SaveUserWithMock(user); err != nil {
 		log.Printf("[AUTH] WARNING: Failed to save user to DB: %v", err)
 	} else {
-		log.Printf("[AUTH] User saved to DynamoDB: %s", userInfo.Email)
+		log.Printf("[AUTH] User saved to database: %s", userInfo.Email)
 	}
 
 	log.Printf("[AUTH] JWT token generated successfully for user: %s", userInfo.Email)
@@ -317,6 +403,7 @@ func handleLogout(w http.ResponseWriter, r *http.Request) {
 	if frontendURL == "" {
 		frontendURL = "http://localhost:3000"
 	}
+	frontendURL = strings.TrimSuffix(frontendURL, "/")
 	w.Header().Set("Access-Control-Allow-Origin", frontendURL)
 	w.Header().Set("Access-Control-Allow-Credentials", "true")
 	w.Header().Set("Access-Control-Allow-Methods", "POST, OPTIONS")

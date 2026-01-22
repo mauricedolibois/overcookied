@@ -1,0 +1,16 @@
+# OAuth Configuration ConfigMap
+# This ConfigMap holds URLs that change when the ALB is recreated
+# Update this after deploying the ingress to set the correct URLs
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: oauth-config
+  namespace: overcookied
+  labels:
+    app: overcookied
+    component: config
+data:
+  # Format: https://<DOMAIN>/auth/google/callback
+  GOOGLE_REDIRECT_URL: "https://overcookied.de/auth/google/callback"
+  # Format: https://<DOMAIN>
+  FRONTEND_URL: "https://overcookied.de"

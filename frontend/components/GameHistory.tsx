@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import { getApiUrl } from '@/lib/auth';
 
 interface GameRecord {
   id: string;
@@ -22,19 +23,19 @@ interface GameHistoryProps {
 
 export default function GameHistory({ userId }: GameHistoryProps) {
   const [games, setGames] = useState<GameRecord[]>([]);
+  const [totalCount, setTotalCount] = useState<number>(0);
   const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
     async function fetchHistory() {
       if (!userId) return;
       try {
-        const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/history?userId=${userId}`);
+        const res = await fetch(`${getApiUrl()}/api/history?userId=${userId}`);
         if (res.ok) {
           const data = await res.json();
-          console.log("History Data:", data);
-          // API returns CookieGame: { gameId, score, cookies, won, reason, ... }
-          // API returns CookieGame with new fields
-          const mappedData = data.map((g: any) => ({
+          // API now returns { games: [...], totalCount: number }
+          const gamesData = data.games || data;
+          const mappedData = gamesData.map((g: any) => ({
             id: g.gameId,
             score: g.score,
             opponentScore: g.opponentScore,
@@ -48,6 +49,7 @@ export default function GameHistory({ userId }: GameHistoryProps) {
             timestamp: g.timestamp,
           }));
           setGames(mappedData);
+          setTotalCount(data.totalCount || mappedData.length);
         }
       } catch (error) {
         console.error("Failed to fetch history", error);
@@ -145,7 +147,7 @@ export default function GameHistory({ userId }: GameHistoryProps) {
           <div className="grid grid-cols-2 gap-4 text-center">
             <div>
               <div className="text-3xl font-extrabold text-gray-800">
-                {games.length}
+                {totalCount}
               </div>
               <div className="text-sm text-gray-600 font-bold">
                 Games Played

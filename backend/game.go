@@ -11,6 +11,35 @@ import (
 	"github.com/mauricedolibois/overcookied/backend/db"
 )
 
+// toInt converts interface{} to int, handling both int and float64 types
+// This is needed because JSON unmarshaling produces float64, but in-memory mock passes int directly
+func toInt(v interface{}) int {
+	switch val := v.(type) {
+	case int:
+		return val
+	case float64:
+		return int(val)
+	case int64:
+		return int(val)
+	default:
+		return 0
+	}
+}
+
+// toFloat64 converts interface{} to float64, handling both int and float64 types
+func toFloat64(v interface{}) float64 {
+	switch val := v.(type) {
+	case float64:
+		return val
+	case int:
+		return float64(val)
+	case int64:
+		return float64(val)
+	default:
+		return 0
+	}
+}
+
 // Message Types
 const (
 	MsgTypeJoinQueue     = "JOIN_QUEUE"
@@ -39,6 +68,8 @@ type GameState struct {
 	P2Score       int    `json:"p2Score"`
 	P1Name        string `json:"p1Name"`
 	P2Name        string `json:"p2Name"`
+	P1Picture     string `json:"p1Picture"`
+	P2Picture     string `json:"p2Picture"`
 }
 
 type GameRoom struct {
@@ -59,11 +90,13 @@ type GameRoom struct {
 
 type GameManager struct {
 	clients     map[*Client]bool
+	clientsByID map[string]*Client // UserID -> Client mapping for Redis notifications
 	broadcast   chan []byte
 	register    chan *Client
 	unregister  chan *Client
-	waiting     *Client // Simple queue for 1v1
+	waiting     *Client // Simple queue for 1v1 (in-memory fallback)
 	clientRooms map[*Client]*GameRoom
+	mutex       sync.Mutex
 }
 
 func NewGameManager() *GameManager {
@@ -72,6 +105,7 @@ func NewGameManager() *GameManager {
 		register:    make(chan *Client),
 		unregister:  make(chan *Client),
 		clients:     make(map[*Client]bool),
+		clientsByID: make(map[string]*Client),
 		clientRooms: make(map[*Client]*GameRoom),
 		waiting:     nil,
 	}
@@ -81,10 +115,19 @@ func (gm *GameManager) Run() {
 	for {
 		select {
 		case client := <-gm.register:
+			gm.mutex.Lock()
 			gm.clients[client] = true
+			gm.clientsByID[client.userID] = client
+			gm.mutex.Unlock()
 			log.Printf("New client connected: %s", client.userID)
 		case client := <-gm.unregister:
+			gm.mutex.Lock()
 			if _, ok := gm.clients[client]; ok {
+				// Remove from Redis queue if using distributed matchmaking
+				if IsRedisAvailable() {
+					RemoveFromQueue(client.userID)
+				}
+
 				// Handle game disconnect if needs be
 				if room, ok := gm.clientRooms[client]; ok {
 					// Notify Valid Opponent
@@ -121,13 +164,16 @@ func (gm *GameManager) Run() {
 					delete(gm.clientRooms, room.Player2)
 				}
 				delete(gm.clients, client)
+				delete(gm.clientsByID, client.userID)
 				close(client.send)
 				if gm.waiting == client {
 					gm.waiting = nil
 				}
 				log.Printf("Client disconnected: %s", client.userID)
 			}
+			gm.mutex.Unlock()
 		case message := <-gm.broadcast:
+			gm.mutex.Lock()
 			for client := range gm.clients {
 				select {
 				case client.send <- message:
@@ -136,6 +182,7 @@ func (gm *GameManager) Run() {
 					delete(gm.clients, client)
 				}
 			}
+			gm.mutex.Unlock()
 		}
 	}
 }
@@ -151,14 +198,137 @@ func (gm *GameManager) handleMessage(client *Client, msg []byte) {
 	case MsgTypeJoinQueue:
 		gm.handleJoinQueue(client)
 	case MsgTypeClick, MsgTypeCookieClick, MsgTypeQuit:
-		if room, ok := gm.clientRooms[client]; ok {
+		// Use distributed game handling if Redis is available
+		if IsRedisAvailable() {
+			gm.handleDistributedGameMessage(client, genericMsg)
+		} else if room, ok := gm.clientRooms[client]; ok {
 			room.HandleGameMessage(client, genericMsg)
 		}
 	}
 }
 
+// handleDistributedGameMessage handles game messages via Redis
+func (gm *GameManager) handleDistributedGameMessage(client *Client, msg GameMessage) {
+	gm.mutex.Lock()
+	room, ok := gm.clientRooms[client]
+	gm.mutex.Unlock()
+
+	if !ok || room == nil {
+		log.Printf("No room found for client %s", client.userID)
+		return
+	}
+
+	roomID := room.ID
+
+	switch msg.Type {
+	case MsgTypeClick:
+		// Get current state to check for double-click powerup
+		state, err := GetGameState(roomID)
+		if err != nil {
+			log.Printf("Failed to get game state: %v", err)
+			return
+		}
+
+		points := 1
+		if expiry, ok := state.DoubleClickExpiry[client.userID]; ok && time.Now().Unix() < expiry {
+			points = 2
+		}
+
+		// Atomically update score in Redis
+		updatedState, err := AtomicScoreIncrement(roomID, client.userID, points)
+		if err != nil {
+			log.Printf("Failed to increment score: %v", err)
+			return
+		}
+
+		// Publish click event to all pods with updated scores
+		event := GameEvent{
+			RoomID:    roomID,
+			EventType: EventClick,
+			PlayerID:  client.userID,
+			Data: map[string]interface{}{
+				"points":  float64(points),
+				"p1Score": float64(updatedState.P1Score),
+				"p2Score": float64(updatedState.P2Score),
+			},
+		}
+		PublishGameEvent(event)
+
+	case MsgTypeCookieClick:
+		// Try to atomically claim the golden cookie
+		claimed, err := AtomicClaimGoldenCookie(roomID, client.userID)
+		if err != nil {
+			log.Printf("Failed to claim golden cookie: %v", err)
+			return
+		}
+
+		if claimed {
+			state, _ := GetGameState(roomID)
+			event := GameEvent{
+				RoomID:    roomID,
+				EventType: EventGoldenClaim,
+				PlayerID:  client.userID,
+				Data: map[string]interface{}{
+					"claimedBy": client.userID,
+					"p1Score":   float64(state.P1Score),
+					"p2Score":   float64(state.P2Score),
+				},
+			}
+			PublishGameEvent(event)
+		}
+
+	case MsgTypeQuit:
+		log.Printf("Processing QUIT_GAME from user: %s in room %s", client.userID, roomID)
+
+		state, err := GetGameState(roomID)
+		if err != nil {
+			return
+		}
+
+		// Determine winner (the other player)
+		winnerID := state.Player1ID
+		if client.userID == state.Player1ID {
+			winnerID = state.Player2ID
+		}
+
+		state.GameEnded = true
+		state.WinnerID = winnerID
+		SaveGameState(state)
+
+		// Publish quit event
+		event := GameEvent{
+			RoomID:    roomID,
+			EventType: EventPlayerQuit,
+			PlayerID:  client.userID,
+			Data:      map[string]interface{}{"winner": winnerID, "reason": "quit"},
+		}
+		PublishGameEvent(event)
+
+		// Clean up
+		go func() {
+			time.Sleep(5 * time.Second)
+			DeleteGameState(roomID)
+		}()
+	}
+}
+
 func (gm *GameManager) handleJoinQueue(client *Client) {
 	log.Printf("Client %s joined queue", client.userID)
+
+	// Use Redis for distributed matchmaking if available
+	if IsRedisAvailable() {
+		err := AddToQueue(client)
+		if err != nil {
+			log.Printf("Failed to add to Redis queue: %v, using in-memory fallback", err)
+			// Fall through to in-memory matchmaking
+		} else {
+			return // Redis will handle matchmaking via RunMatchmakingLoop
+		}
+	}
+
+	// In-memory fallback for single-pod mode
+	gm.mutex.Lock()
+	defer gm.mutex.Unlock()
 	if gm.waiting != nil && gm.waiting != client {
 		// Found a match!
 		opponent := gm.waiting
@@ -169,6 +339,432 @@ func (gm *GameManager) handleJoinQueue(client *Client) {
 	}
 }
 
+// RunMatchmakingLoop continuously checks Redis for matchmaking opportunities
+func (gm *GameManager) RunMatchmakingLoop() {
+	ticker := time.NewTicker(500 * time.Millisecond)
+	defer ticker.Stop()
+
+	for range ticker.C {
+		player1, player2, err := TryMatchmaking()
+		if err != nil {
+			log.Printf("Matchmaking error: %v", err)
+			continue
+		}
+
+		if player1 != nil && player2 != nil {
+			// Found a match! Create room and notify both pods
+			roomID := fmt.Sprintf("%s_%s_%d", player1.UserID, player2.UserID, time.Now().Unix())
+
+			// Create distributed game state in Redis
+			if err := CreateDistributedGame(roomID, player1, player2); err != nil {
+				log.Printf("Failed to create distributed game: %v", err)
+				continue
+			}
+
+			match := MatchNotification{
+				Player1ID: player1.UserID,
+				Player2ID: player2.UserID,
+				RoomID:    roomID,
+				HostPodID: GetPodID(),
+			}
+
+			// Publish match notification to all pods
+			if err := PublishMatchNotification(match); err != nil {
+				log.Printf("Failed to publish match notification: %v", err)
+			}
+		}
+	}
+}
+
+// SubscribeToMatchNotifications listens for match notifications from Redis Pub/Sub
+func (gm *GameManager) SubscribeToMatchNotifications() {
+	SubscribeToMatches(func(match MatchNotification) {
+		gm.handleMatchNotification(match)
+	})
+}
+
+// handleMatchNotification handles a match found by any pod
+func (gm *GameManager) handleMatchNotification(match MatchNotification) {
+	log.Printf("Received match notification: %s vs %s (host: %s)", match.Player1ID, match.Player2ID, match.HostPodID)
+
+	gm.mutex.Lock()
+	p1, hasP1 := gm.clientsByID[match.Player1ID]
+	p2, hasP2 := gm.clientsByID[match.Player2ID]
+	gm.mutex.Unlock()
+
+	// With distributed games, we don't need both players on the same pod
+	// Each pod notifies its local player about the game start
+
+	if hasP1 {
+		log.Printf("Notifying local player %s about game start", match.Player1ID)
+		gm.sendGameStart(p1, match.Player2ID, "p1", match.RoomID)
+
+		// Track which room this client is in
+		gm.mutex.Lock()
+		gm.clientRooms[p1] = &GameRoom{ID: match.RoomID}
+		gm.mutex.Unlock()
+	}
+
+	if hasP2 {
+		log.Printf("Notifying local player %s about game start", match.Player2ID)
+		gm.sendGameStart(p2, match.Player1ID, "p2", match.RoomID)
+
+		// Track which room this client is in
+		gm.mutex.Lock()
+		gm.clientRooms[p2] = &GameRoom{ID: match.RoomID}
+		gm.mutex.Unlock()
+	}
+
+	// Only the timer pod runs the game loop
+	if match.HostPodID == GetPodID() {
+		log.Printf("This pod is the timer pod for room %s", match.RoomID)
+		go gm.runDistributedGameLoop(match.RoomID)
+	}
+}
+
+// sendGameStart sends the game start message to a player
+func (gm *GameManager) sendGameStart(client *Client, opponentID, role, roomID string) {
+	// Get initial game state from Redis
+	state, err := GetGameState(roomID)
+	if err != nil {
+		log.Printf("Failed to get game state for GAME_START: %v", err)
+		return
+	}
+
+	startMsg := GameMessage{
+		Type: MsgTypeGameStart,
+		Payload: map[string]interface{}{
+			"opponent":      opponentID,
+			"role":          role,
+			"roomId":        roomID,
+			"timeRemaining": state.TimeRemaining,
+			"p1Score":       state.P1Score,
+			"p2Score":       state.P2Score,
+			"p1Name":        state.Player1Name,
+			"p2Name":        state.Player2Name,
+			"p1Picture":     state.Player1Picture,
+			"p2Picture":     state.Player2Picture,
+		},
+	}
+	bytes, _ := json.Marshal(startMsg)
+	select {
+	case client.send <- bytes:
+	default:
+	}
+}
+
+// runDistributedGameLoop runs the game timer and broadcasts state updates via Redis
+func (gm *GameManager) runDistributedGameLoop(roomID string) {
+	// Broadcast initial state immediately so clients have game info during countdown
+	gm.broadcastGameState(roomID)
+
+	// Wait for countdown (5 seconds)
+	time.Sleep(5 * time.Second)
+
+	// Mark game as started
+	state, err := GetGameState(roomID)
+	if err != nil {
+		log.Printf("Failed to get game state for %s: %v", roomID, err)
+		return
+	}
+	state.GameStarted = true
+	SaveGameState(state)
+
+	// Broadcast initial state
+	gm.broadcastGameState(roomID)
+
+	ticker := time.NewTicker(1 * time.Second)
+	gcTimer := time.NewTimer(time.Duration(5+rand.Intn(6)) * time.Second)
+
+	defer func() {
+		ticker.Stop()
+		gcTimer.Stop()
+	}()
+
+	for {
+		select {
+		case <-ticker.C:
+			state, err := GetGameState(roomID)
+			if err != nil {
+				log.Printf("Game %s state not found, stopping loop", roomID)
+				return
+			}
+
+			if state.GameEnded {
+				return
+			}
+
+			state.TimeRemaining--
+			SaveGameState(state)
+
+			if state.TimeRemaining <= 0 {
+				gm.endDistributedGame(roomID)
+				return
+			}
+
+			// Broadcast state update via Redis
+			gm.broadcastGameState(roomID)
+
+		case <-gcTimer.C:
+			gm.spawnDistributedGoldenCookie(roomID)
+			gcTimer.Reset(time.Duration(5+rand.Intn(6)) * time.Second)
+		}
+	}
+}
+
+// broadcastGameState sends game state to all pods via Redis Pub/Sub
+func (gm *GameManager) broadcastGameState(roomID string) {
+	state, err := GetGameState(roomID)
+	if err != nil {
+		return
+	}
+
+	event := GameEvent{
+		RoomID:    roomID,
+		EventType: EventStateUpdate,
+		Data: map[string]interface{}{
+			"timeRemaining": state.TimeRemaining,
+			"p1Score":       state.P1Score,
+			"p2Score":       state.P2Score,
+			"p1Name":        state.Player1Name,
+			"p2Name":        state.Player2Name,
+			"p1Picture":     state.Player1Picture,
+			"p2Picture":     state.Player2Picture,
+		},
+	}
+	PublishGameEvent(event)
+}
+
+// spawnDistributedGoldenCookie spawns a golden cookie and notifies all pods
+func (gm *GameManager) spawnDistributedGoldenCookie(roomID string) {
+	state, err := GetGameState(roomID)
+	if err != nil {
+		return
+	}
+
+	state.GoldenCookieActive = true
+	state.GoldenCookieX = rand.Float64()*90 + 5
+	state.GoldenCookieY = rand.Float64()*90 + 5
+	SaveGameState(state)
+
+	event := GameEvent{
+		RoomID:    roomID,
+		EventType: EventGoldenSpawn,
+		Data: map[string]interface{}{
+			"x": state.GoldenCookieX,
+			"y": state.GoldenCookieY,
+		},
+	}
+	PublishGameEvent(event)
+}
+
+// endDistributedGame ends the game and notifies all pods
+func (gm *GameManager) endDistributedGame(roomID string) {
+	state, err := GetGameState(roomID)
+	if err != nil {
+		return
+	}
+
+	state.GameEnded = true
+
+	// Determine winner
+	if state.P1Score > state.P2Score {
+		state.WinnerID = state.Player1ID
+	} else if state.P2Score > state.P1Score {
+		state.WinnerID = state.Player2ID
+	} else {
+		state.WinnerID = "draw"
+	}
+
+	SaveGameState(state)
+
+	event := GameEvent{
+		RoomID:    roomID,
+		EventType: EventGameEnd,
+		Data: map[string]interface{}{
+			"winner":  state.WinnerID,
+			"p1Score": state.P1Score,
+			"p2Score": state.P2Score,
+		},
+	}
+	PublishGameEvent(event)
+
+	// Persist game stats (only timer pod does this)
+	go gm.persistGameStats(state)
+
+	// Clean up game state after a delay
+	go func() {
+		time.Sleep(30 * time.Second)
+		DeleteGameState(roomID)
+	}()
+}
+
+// persistGameStats saves game results to database (DynamoDB or mock)
+func (gm *GameManager) persistGameStats(state *DistributedGameState) {
+	timestamp := time.Now().Unix()
+	p1Won := state.P1Score > state.P2Score
+
+	// P1
+	db.SaveGameWithMock(db.CookieGame{
+		GameID: state.RoomID, PlayerID: state.Player1ID, Timestamp: timestamp,
+		Score: state.P1Score, OpponentScore: state.P2Score,
+		Reason: "normal", Won: p1Won, WinnerID: state.WinnerID, Opponent: state.Player2ID,
+		PlayerName: state.Player1Name, PlayerPicture: state.Player1Picture,
+		OpponentName: state.Player2Name, OpponentPicture: state.Player2Picture,
+	})
+	db.UpdateUserStatsWithMock(state.Player1ID, state.P1Score)
+
+	// P2
+	db.SaveGameWithMock(db.CookieGame{
+		GameID: state.RoomID, PlayerID: state.Player2ID, Timestamp: timestamp,
+		Score: state.P2Score, OpponentScore: state.P1Score,
+		Reason: "normal", Won: !p1Won, WinnerID: state.WinnerID, Opponent: state.Player1ID,
+		PlayerName: state.Player2Name, PlayerPicture: state.Player2Picture,
+		OpponentName: state.Player1Name, OpponentPicture: state.Player1Picture,
+	})
+	db.UpdateUserStatsWithMock(state.Player2ID, state.P2Score)
+}
+
+// SubscribeToGameEvents listens for game events from all pods
+func (gm *GameManager) SubscribeToGameEvents() {
+	SubscribeToGameEvents(func(event GameEvent) {
+		gm.handleGameEvent(event)
+	})
+}
+
+// handleGameEvent processes game events and sends them to local clients
+func (gm *GameManager) handleGameEvent(event GameEvent) {
+	gm.mutex.Lock()
+	defer gm.mutex.Unlock()
+
+	// Find local clients for this game
+	var localClients []*Client
+	for client, room := range gm.clientRooms {
+		if room != nil && room.ID == event.RoomID {
+			localClients = append(localClients, client)
+		}
+	}
+
+	if len(localClients) == 0 {
+		return // No local players for this game
+	}
+
+	var msg GameMessage
+
+	switch event.EventType {
+	case EventStateUpdate:
+		p1Picture := ""
+		if pic, ok := event.Data["p1Picture"].(string); ok {
+			p1Picture = pic
+		}
+		p2Picture := ""
+		if pic, ok := event.Data["p2Picture"].(string); ok {
+			p2Picture = pic
+		}
+		msg = GameMessage{
+			Type: MsgTypeUpdate,
+			Payload: GameState{
+				TimeRemaining: toInt(event.Data["timeRemaining"]),
+				P1Score:       toInt(event.Data["p1Score"]),
+				P2Score:       toInt(event.Data["p2Score"]),
+				P1Name:        event.Data["p1Name"].(string),
+				P2Name:        event.Data["p2Name"].(string),
+				P1Picture:     p1Picture,
+				P2Picture:     p2Picture,
+			},
+		}
+
+	case EventGoldenSpawn:
+		msg = GameMessage{
+			Type:    MsgTypeCookieSpawn,
+			Payload: map[string]float64{"x": toFloat64(event.Data["x"]), "y": toFloat64(event.Data["y"])},
+		}
+
+	case EventGoldenClaim:
+		msg = GameMessage{
+			Type: MsgTypeUpdate,
+			Payload: map[string]interface{}{
+				"goldenCookieClaimedBy": event.Data["claimedBy"],
+				"p1Score":               event.Data["p1Score"],
+				"p2Score":               event.Data["p2Score"],
+			},
+		}
+
+	case EventClick:
+		// Send opponent click notification only to the opponent
+		clickerID := event.PlayerID
+		points := toInt(event.Data["points"])
+
+		for _, client := range localClients {
+			if client.userID != clickerID {
+				oppMsg := GameMessage{
+					Type:    MsgTypeOpponentClick,
+					Payload: map[string]int{"count": points},
+				}
+				bytes, _ := json.Marshal(oppMsg)
+				select {
+				case client.send <- bytes:
+				default:
+				}
+			}
+		}
+
+		// Send real-time score update to ALL players
+		p1Score := toInt(event.Data["p1Score"])
+		p2Score := toInt(event.Data["p2Score"])
+		scoreMsg := GameMessage{
+			Type: MsgTypeUpdate,
+			Payload: map[string]interface{}{
+				"p1Score": p1Score,
+				"p2Score": p2Score,
+			},
+		}
+		scoreBytes, _ := json.Marshal(scoreMsg)
+		for _, client := range localClients {
+			select {
+			case client.send <- scoreBytes:
+			default:
+			}
+		}
+		return // Don't send the generic message
+
+	case EventGameEnd:
+		msg = GameMessage{
+			Type:    MsgTypeGameOver,
+			Payload: map[string]interface{}{"winner": event.Data["winner"]},
+		}
+
+		// Clean up client rooms
+		for _, client := range localClients {
+			delete(gm.clientRooms, client)
+		}
+
+	case EventPlayerQuit:
+		winnerID := event.Data["winner"].(string)
+		msg = GameMessage{
+			Type:    MsgTypeGameOver,
+			Payload: map[string]string{"winner": winnerID, "reason": "quit"},
+		}
+
+		// Clean up client rooms
+		for _, client := range localClients {
+			delete(gm.clientRooms, client)
+		}
+
+	default:
+		return
+	}
+
+	// Send to all local clients
+	bytes, _ := json.Marshal(msg)
+	for _, client := range localClients {
+		select {
+		case client.send <- bytes:
+		default:
+		}
+	}
+}
+
 func (gm *GameManager) StartGame(p1, p2 *Client) {
 	log.Printf("Starting game between %s and %s", p1.userID, p2.userID)
 	room := &GameRoom{
@@ -176,7 +772,7 @@ func (gm *GameManager) StartGame(p1, p2 *Client) {
 		Player1: p1,
 		Player2: p2,
 		State: GameState{
-			TimeRemaining: 120,       // 2 minutes
+			TimeRemaining: 60,        // 1 minute
 			P1Name:        p1.userID, // Replace with real name later
 			P2Name:        p2.userID,
 		},
@@ -213,8 +809,8 @@ func (room *GameRoom) Run() {
 	time.Sleep(5 * time.Second)
 
 	ticker := time.NewTicker(1 * time.Second)
-	// Golden cookie ticker (random interval 20-40s)
-	gcTimer := time.NewTimer(time.Duration(20+rand.Intn(21)) * time.Second)
+	// Golden cookie ticker (random interval 5-10s)
+	gcTimer := time.NewTimer(time.Duration(5+rand.Intn(6)) * time.Second)
 
 	defer func() {
 		ticker.Stop()
@@ -238,7 +834,7 @@ func (room *GameRoom) Run() {
 			room.broadcastState()
 		case <-gcTimer.C:
 			room.SpawnGoldenCookie()
-			gcTimer.Reset(time.Duration(20+rand.Intn(21)) * time.Second)
+			gcTimer.Reset(time.Duration(5+rand.Intn(6)) * time.Second)
 		}
 	}
 }
@@ -302,24 +898,24 @@ func (room *GameRoom) EndGame() {
 		timestamp := time.Now().Unix()
 
 		// P1
-		db.SaveGame(db.CookieGame{
+		db.SaveGameWithMock(db.CookieGame{
 			GameID: room.ID, PlayerID: room.Player1.userID, Timestamp: timestamp,
 			Score: room.State.P1Score, OpponentScore: room.State.P2Score,
 			Reason: "normal", Won: p1Won, WinnerID: winnerID, Opponent: room.Player2.userID,
 			PlayerName: room.Player1.name, PlayerPicture: room.Player1.picture,
 			OpponentName: room.Player2.name, OpponentPicture: room.Player2.picture,
 		})
-		db.UpdateUserStats(room.Player1.userID, room.State.P1Score)
+		db.UpdateUserStatsWithMock(room.Player1.userID, room.State.P1Score)
 
 		// P2
-		db.SaveGame(db.CookieGame{
+		db.SaveGameWithMock(db.CookieGame{
 			GameID: room.ID, PlayerID: room.Player2.userID, Timestamp: timestamp,
 			Score: room.State.P2Score, OpponentScore: room.State.P1Score,
 			Reason: "normal", Won: !p1Won, WinnerID: winnerID, Opponent: room.Player1.userID,
 			PlayerName: room.Player2.name, PlayerPicture: room.Player2.picture,
 			OpponentName: room.Player1.name, OpponentPicture: room.Player1.picture,
 		})
-		db.UpdateUserStats(room.Player2.userID, room.State.P2Score)
+		db.UpdateUserStatsWithMock(room.Player2.userID, room.State.P2Score)
 	}()
 
 	room.Close <- true
@@ -360,12 +956,30 @@ func (room *GameRoom) HandleGameMessage(client *Client, msg GameMessage) {
 		default:
 		}
 
+		// Send real-time score update to both players
+		scoreMsg := GameMessage{
+			Type: MsgTypeUpdate,
+			Payload: map[string]interface{}{
+				"p1Score": room.State.P1Score,
+				"p2Score": room.State.P2Score,
+			},
+		}
+		scoreBytes, _ := json.Marshal(scoreMsg)
+		select {
+		case room.Player1.send <- scoreBytes:
+		default:
+		}
+		select {
+		case room.Player2.send <- scoreBytes:
+		default:
+		}
+
 	case MsgTypeCookieClick:
 		// Attempt to claim golden cookie
 		if room.GoldenCookieActive {
 			room.GoldenCookieActive = false
-			// Award powerup
-			room.DoubleClickActive[client.userID] = time.Now().Add(5 * time.Second)
+			// Award powerup (3 second double-click bonus)
+			room.DoubleClickActive[client.userID] = time.Now().Add(3 * time.Second)
 
 			// Notify players who got it
 			// Send message about who got the double click

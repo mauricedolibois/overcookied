@@ -6,6 +6,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"strings"
 
 	"github.com/joho/godotenv"
 	"github.com/mauricedolibois/overcookied/backend/db"
@@ -38,9 +39,24 @@ func apiHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func enableCors(w *http.ResponseWriter) {
-	(*w).Header().Set("Access-Control-Allow-Origin", "http://localhost:3000") // Or "*"
-	(*w).Header().Set("Access-Control-Allow-Methods", "GET, OPTIONS")
-	(*w).Header().Set("Access-Control-Allow-Headers", "Content-Type")
+	frontendURL := os.Getenv("FRONTEND_URL")
+	if frontendURL == "" {
+		frontendURL = "http://localhost:3000"
+	}
+	// Remove trailing slash if present
+	frontendURL = strings.TrimSuffix(frontendURL, "/")
+
+	(*w).Header().Set("Access-Control-Allow-Origin", frontendURL)
+	(*w).Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+	(*w).Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
+	(*w).Header().Set("Access-Control-Allow-Credentials", "true")
+}
+
+// PublicLeaderboardEntry is a safe structure that doesn't expose sensitive data
+type PublicLeaderboardEntry struct {
+	Name    string `json:"name"`
+	Picture string `json:"picture"`
+	Score   int    `json:"score"`
 }
 
 func handleLeaderboard(w http.ResponseWriter, r *http.Request) {
@@ -50,13 +66,23 @@ func handleLeaderboard(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
-	users, err := db.GetLeaderboard(10)
+	users, err := db.GetLeaderboardWithMock(10)
 	if err != nil {
 		log.Printf("[API] Error fetching leaderboard: %v", err)
 		http.Error(w, "Failed to fetch leaderboard", http.StatusInternalServerError)
 		return
 	}
-	json.NewEncoder(w).Encode(users)
+
+	// Convert to public format - exclude userId and email
+	publicEntries := make([]PublicLeaderboardEntry, len(users))
+	for i, u := range users {
+		publicEntries[i] = PublicLeaderboardEntry{
+			Name:    u.Name,
+			Picture: u.Picture,
+			Score:   u.Score,
+		}
+	}
+	json.NewEncoder(w).Encode(publicEntries)
 }
 
 func handleHistory(w http.ResponseWriter, r *http.Request) {
@@ -72,13 +98,25 @@ func handleHistory(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	games, err := db.GetGameHistory(userID, 20)
+	games, err := db.GetGameHistoryWithMock(userID, 20)
 	if err != nil {
 		log.Printf("[API] Error fetching history: %v", err)
 		http.Error(w, "Failed to fetch history", http.StatusInternalServerError)
 		return
 	}
-	json.NewEncoder(w).Encode(games)
+
+	// Get total count of games for this player
+	totalCount, err := db.CountGamesByPlayerWithMock(userID)
+	if err != nil {
+		log.Printf("[API] Error counting games: %v", err)
+		totalCount = len(games) // Fallback to length of returned games
+	}
+
+	response := map[string]interface{}{
+		"games":      games,
+		"totalCount": totalCount,
+	}
+	json.NewEncoder(w).Encode(response)
 }
 
 func main() {
@@ -90,12 +128,25 @@ func main() {
 	// Initialize OAuth
 	initOAuth()
 
-	// Initialize DB
-	db.Init()
+	// Initialize DB (with mock support for local development)
+	db.InitWithMocks()
+
+	// Initialize Redis/Valkey for distributed matchmaking
+	if err := InitRedis(); err != nil {
+		log.Printf("Warning: Redis not available, using in-memory matchmaking (single-pod mode)")
+	}
 
 	// Initialize Game Manager
 	gameManager := NewGameManager()
 	go gameManager.Run()
+
+	// Start matchmaking loop and event subscriptions if Redis is available
+	if IsRedisAvailable() {
+		go gameManager.RunMatchmakingLoop()
+		go gameManager.SubscribeToMatchNotifications()
+		go gameManager.SubscribeToGameEvents() // Subscribe to distributed game events
+		log.Println("Distributed matchmaking and game events enabled via Redis")
+	}
 
 	// Get port from environment or use default
 	port := os.Getenv("PORT")

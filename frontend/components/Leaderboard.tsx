@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import { getApiUrl } from '@/lib/auth';
 
 interface LeaderboardEntry {
   rank: number;
@@ -16,10 +17,9 @@ export default function Leaderboard() {
   useEffect(() => {
     async function fetchLeaderboard() {
       try {
-        const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/leaderboard`);
+        const res = await fetch(`${getApiUrl()}/api/leaderboard`);
         if (res.ok) {
           const data = await res.json();
-          console.log("Leaderboard Data:", data);
           // Map API response to Component format (if needed, but structure matches closely)
           // API returns CookieUser: { userId, email, name, picture, score, cookies }
           // Component expects: { rank, username, score, avatar }

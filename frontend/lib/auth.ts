@@ -6,7 +6,12 @@ export interface UserSession {
   token: string;
 }
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8080';
+// Standalone helper function for API URL (used by components)
+// Returns empty string for production (relative URLs) or configured URL for development
+export function getApiUrl(): string {
+  if (typeof window === 'undefined') return '';
+  return process.env.NEXT_PUBLIC_API_URL || '';
+}
 
 export const authService = {
   // Get current user from localStorage
@@ -31,7 +36,9 @@ export const authService = {
   // Verify session with backend (JWT validation)
   async verifySession(token: string): Promise<UserSession | null> {
     try {
-      const response = await fetch(`${API_URL}/auth/verify`, {
+      // Use API URL - relative in production, absolute in development
+      const apiUrl = this.getApiUrl();
+      const response = await fetch(`${apiUrl}/auth/verify`, {
         method: 'GET',
         headers: {
           'Authorization': `Bearer ${token}`,
@@ -56,7 +63,9 @@ export const authService = {
     const user = this.getCurrentUser();
     if (user?.token) {
       try {
-        await fetch(`${API_URL}/auth/logout`, {
+        // Use API URL - relative in production, absolute in development
+        const apiUrl = this.getApiUrl();
+        await fetch(`${apiUrl}/auth/logout`, {
           method: 'POST',
           headers: {
             'Authorization': `Bearer ${user.token}`,
@@ -71,9 +80,19 @@ export const authService = {
     this.removeUser();
   },
 
+  // Get API URL - empty for production (relative URLs), configured for development
+  getApiUrl(): string {
+    if (typeof window === 'undefined') return '';
+    // In production (same host), use relative URLs
+    // In development, NEXT_PUBLIC_API_URL can be set to http://localhost:8080
+    return process.env.NEXT_PUBLIC_API_URL || '';
+  },
+
   // Initiate Google OAuth login
   loginWithGoogle() {
-    window.location.href = `${API_URL}/auth/google/login`;
+    // Use API URL for OAuth - important for local development
+    const apiUrl = this.getApiUrl();
+    window.location.href = `${apiUrl}/auth/google/login`;
   },
 
   // Check if user is authenticated (validates JWT locally)

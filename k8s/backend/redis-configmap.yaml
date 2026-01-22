@@ -1,0 +1,12 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: redis-config
+  namespace: overcookied
+  labels:
+    app: overcookied
+    component: config
+data:
+  # This will be updated by deploy-app.ps1 after Terraform provisions Valkey
+  # Format: <endpoint>:6379
+  REDIS_ENDPOINT: ""

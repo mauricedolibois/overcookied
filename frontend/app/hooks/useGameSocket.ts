@@ -1,7 +1,24 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { UserSession } from '@/lib/auth';
 
-const WS_URL = process.env.NEXT_PUBLIC_WS_URL || 'ws://localhost:8080/ws';
+// WebSocket URL is computed at connection time to avoid build-time evaluation
+// In development, NEXT_PUBLIC_API_URL points to localhost:8080 (backend)
+// In production, it's empty so we derive from window.location
+const getWsUrl = (): string => {
+    const apiUrl = process.env.NEXT_PUBLIC_API_URL;
+    
+    // Development: Use API URL for WebSocket (localhost:8080)
+    if (apiUrl) {
+        const wsProtocol = apiUrl.startsWith('https') ? 'wss:' : 'ws:';
+        // Extract host from API URL (e.g., "http://localhost:8080" -> "localhost:8080")
+        const host = apiUrl.replace(/^https?:\/\//, '');
+        return `${wsProtocol}//${host}/ws`;
+    }
+    
+    // Production: Derive WebSocket URL from current browser location
+    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    return `${protocol}//${window.location.host}/ws`;
+};
 
 export type GameState = {
     timeRemaining: number;
@@ -9,6 +26,9 @@ export type GameState = {
     p2Score: number;
     p1Name: string;
     p2Name: string;
+    p1Picture?: string;
+    p2Picture?: string;
+    role?: string; // 'p1' or 'p2' - indicates which player we are
     winner?: string;
     goldenCookieClaimedBy?: string;
     reason?: string;
@@ -31,7 +51,9 @@ export const useGameSocket = (user: UserSession | null) => {
     const connect = useCallback(() => {
         if (!user) return;
 
-        const ws = new WebSocket(`${WS_URL}?userId=${user.id}`);
+        const wsUrl = getWsUrl();
+        // Use JWT token for secure WebSocket authentication instead of userId
+        const ws = new WebSocket(`${wsUrl}?token=${encodeURIComponent(user.token)}`);
 
         ws.onopen = () => {
             console.log('Connected to Game Server');
@@ -66,6 +88,19 @@ export const useGameSocket = (user: UserSession | null) => {
         switch (msg.type) {
             case 'GAME_START':
                 setGameStatus('PLAYING');
+                // Set initial game state from GAME_START payload
+                if (msg.payload.timeRemaining !== undefined) {
+                    setGameState({
+                        timeRemaining: msg.payload.timeRemaining,
+                        p1Score: msg.payload.p1Score || 0,
+                        p2Score: msg.payload.p2Score || 0,
+                        p1Name: msg.payload.p1Name || '',
+                        p2Name: msg.payload.p2Name || '',
+                        p1Picture: msg.payload.p1Picture || '',
+                        p2Picture: msg.payload.p2Picture || '',
+                        role: msg.payload.role || 'p1', // Store which player we are (p1 or p2)
+                    });
+                }
                 break;
             case 'UPDATE':
                 setGameState((prev) => ({ ...prev, ...msg.payload }));
