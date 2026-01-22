@@ -41,6 +41,15 @@ if ($LASTEXITCODE -eq 0) {
 Write-Host ""
 Write-Host "🗑️  Step 2: Destroying EKS Terraform stack..." -ForegroundColor Yellow
 Push-Location "$PROJECT_ROOT\infra\eks"
+
+Write-Host "  Initializing Terraform..." -ForegroundColor Yellow
+terraform init -upgrade -reconfigure -input=false
+if ($LASTEXITCODE -ne 0) {
+    Write-Host "❌ Terraform init failed" -ForegroundColor Red
+    Pop-Location
+    exit 1
+}
+
 terraform destroy -auto-approve
 Pop-Location
 

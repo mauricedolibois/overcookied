@@ -47,3 +47,23 @@ next-env.d.ts
 *.out
 go.work
 go.work.sum
+
+# Terraform
+.terraform/
+**/.terraform/
+*.tfstate
+*.tfstate.*
+*.tfvars.json
+**/.terraform.lock.hcl
+**/tfplan
+*.tfplan
+crash.log
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+infra/**/.terraform/
+infra/**/.terraform.lock.hcl
+infra/**/tfplan
+infra/**/errored.tfstate
+scripts/terraform.tfstate
