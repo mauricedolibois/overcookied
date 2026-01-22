@@ -2,103 +2,80 @@
 
 ## Overview
 
-The authentication system has been updated to use **JWT (JSON Web Tokens)** for secure, stateless authentication.
+The authentication system uses **JWT (JSON Web Tokens)** for secure, stateless authentication. This is the primary authentication mechanism for WebSocket connections and API requests.
 
-## What Changed
+## Current Implementation Details
 
-### Backend Changes
+### Backend Stack
 
-1. **JWT Library**: Added `github.com/golang-jwt/jwt/v5` for token generation and validation
+1. **JWT Library**: `github.com/golang-jwt/jwt/v5` v5.2.1 for token generation and validation
+2. **Token Generation**: Occurs after successful Google OAuth callback
+3. **Signing Algorithm**: HS256 (HMAC-SHA256)
+4. **Token Format**: Standard JWT (header.payload.signature)
 
-2. **Token Generation**: Instead of random session tokens, the system now generates JWT tokens containing:
-   - User ID
-   - Email
-   - Name
-   - Profile picture URL
-   - Standard claims (expiration, issued at, issuer)
+### Token Payload
 
-3. **Stateless Authentication**: 
-   - No more in-memory session storage
-   - Tokens are self-contained and validated cryptographically
-   - Each token is signed with a secret key (JWT_SECRET)
-
-4. **Token Expiration**: Tokens expire after 24 hours
-
-### Frontend Changes
-
-1. **JWT Validation**: Client-side validation checks token expiration before making requests
-2. **Token Storage**: Unchanged - still uses localStorage (consider httpOnly cookies for production)
-3. **Token Format**: Updated to handle JWT structure (header.payload.signature)
-
-## JWT Structure
-
-A JWT token consists of three parts separated by dots:
-```
-header.payload.signature
-```
-
-**Example Payload**:
 ```json
 {
   "user_id": "123456789",
-  "email": "user@example.com",
+  "email": "user@example.com", 
   "name": "John Doe",
-  "picture": "https://example.com/photo.jpg",
-  "exp": 1733961600,
-  "iat": 1733875200,
-  "nbf": 1733875200,
+  "picture": "https://lh3.googleusercontent.com/...",
+  "exp": 1734051200,
+  "iat": 1733964800,
+  "nbf": 1733964800,
   "iss": "overcookied"
 }
 ```
 
-## Benefits
-
-1. **Stateless**: Server doesn't need to store session data
-2. **Scalable**: Works across multiple servers without shared storage
-3. **Secure**: Cryptographically signed tokens prevent tampering
-4. **Self-contained**: All user information is in the token
-5. **Standard**: Industry-standard authentication method
-
-## Security Considerations
-
-### Current Implementation
-- ✅ Tokens signed with HS256 (HMAC-SHA256)
-- ✅ 24-hour expiration
-- ✅ Secure secret generation
-- ✅ CORS protection
-
-### Production Recommendations
-1. **Use httpOnly Cookies**: Store JWT in httpOnly cookies instead of localStorage to prevent XSS attacks
-2. **Implement Refresh Tokens**: Allow users to get new tokens without re-authenticating
-3. **Token Blacklisting**: For logout functionality, consider maintaining a blacklist of revoked tokens
-4. **Short Expiration**: Consider shorter expiration times (e.g., 15 minutes) with refresh tokens
-5. **HTTPS Only**: Always use HTTPS in production
-6. **Strong Secret**: Use a cryptographically secure random string (at least 32 characters)
-
-## API Usage
+**Token Expiration**: 24 hours (86,400 seconds) from issue time
 
 ### Authentication Flow
 
-1. User clicks "Continue with Google"
-2. User authenticates with Google OAuth
-3. Backend receives user info and generates JWT
-4. Frontend receives JWT and stores it
-5. Frontend includes JWT in Authorization header for all requests
+1. **Step 1 - User Initiates Login**: User clicks "Login with Google" on frontend
+2. **Step 2 - OAuth Redirect**: Frontend redirects to `/auth/google/login` (backend)
+3. **Step 3 - Google OAuth**: Backend redirects to Google OAuth provider
+4. **Step 4 - User Consent**: User grants permissions to access profile
+5. **Step 5 - OAuth Callback**: Google redirects back to `/auth/google/callback?code=...&state=...`
+6. **Step 6 - Token Exchange**: Backend exchanges authorization code for user profile
+7. **Step 7 - JWT Creation**: Backend creates JWT with user info and secret
+8. **Step 8 - Redirect to Frontend**: Backend redirects to `/dashboard?token=JWT&user=BASE64`
+9. **Step 9 - Token Storage**: Frontend stores JWT in localStorage as part of UserSession
+10. **Step 10 - Authenticated Requests**: All subsequent requests include `Authorization: Bearer JWT`
 
-### Making Authenticated Requests
+### Frontend Storage
 
 ```typescript
-const response = await fetch(`${API_URL}/api/endpoint`, {
-  headers: {
-    'Authorization': `Bearer ${user.token}`,
-    'Content-Type': 'application/json',
-  },
-});
+type UserSession = {
+  id: string;           // Google user ID
+  email: string;
+  name: string;
+  picture: string;
+  token: string;        // JWT token
+};
+
+// Stored in localStorage
+localStorage.setItem('user', JSON.stringify(userSession));
 ```
 
-### Verifying Token
+### WebSocket Authentication
 
-```go
+The WebSocket connection uses JWT tokens for authentication:
+
+```typescript
+// Frontend
+const ws = new WebSocket(`ws://localhost:8080/ws?token=${encodeURIComponent(user.token)}`);
+
+// Backend
+// Token is extracted from query params and validated before upgrading connection
+```
+
+### API Endpoints Protected by JWT
+
+- `GET /api/leaderboard` - Public (no auth required)
+- `GET /api/history?userId=...` - Public user history
+- `POST /ws` - Requires valid JWT in query parameter
+- `GET /auth/verify` - Validates and refreshes JWT tokengo
 claims, err := verifyJWT(tokenString)
 if err != nil {
     // Token is invalid or expired

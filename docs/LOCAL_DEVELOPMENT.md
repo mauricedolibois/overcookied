@@ -1,23 +1,23 @@
-# 🛠️ Lokale Entwicklungsumgebung
+# 🛠️ Local Development Environment
 
-Diese Anleitung beschreibt, wie du Overcookied lokal entwickeln kannst, ohne die Produktionsumgebung oder AWS-Services zu beeinflussen.
+This guide describes how to develop Overcookied locally without deploying to AWS.
 
----
+## Quick Start (with Mocks) - 2 Minutes
 
-## Schnellstart (mit Mocks)
+The simplest method for local development is **Mock Mode**, which replaces all AWS services with in-memory implementations.
 
-Die einfachste Methode für lokale Entwicklung ist der **Mock-Modus**, der keine AWS-Services benötigt.
-
-### 1. Backend starten
+### 1. Start Backend
 
 ```bash
 cd backend
-cp .env.example .env
-# Setze USE_MOCKS=true in der .env (Standard)
+cp .env.example .env  # if it doesn't exist, create one
+# Ensure USE_MOCKS=true (it's the default)
 go run .
 ```
 
-### 2. Frontend starten
+Backend runs on `http://localhost:8080`
+
+### 2. Start Frontend
 
 ```bash
 cd frontend
@@ -25,226 +25,211 @@ npm install
 npm run dev
 ```
 
-### 3. Testen
+Frontend runs on `http://localhost:3000`
 
-Öffne `http://localhost:3000` im Browser.
+### 3. Test
+
+Open `http://localhost:3000` and log in with Google.
 
 ---
 
-## Mock-Modus
+## Mock Mode vs Production Mode
 
-Der Mock-Modus ersetzt AWS-Services durch In-Memory-Implementierungen:
+### Mock Mode (Recommended for Local Development)
 
-| Service | Mock-Verhalten |
-|---------|----------------|
-| **DynamoDB** | In-Memory-Speicher mit Sample-Daten (3 Benutzer, 3 Spiele) |
-| **Redis/Valkey** | In-Memory-Queue für Matchmaking |
-| **OAuth** | Funktioniert normal (benötigt Google Cloud Credentials) |
-
-### Mock-Modus aktivieren
-
-Setze in `backend/.env`:
-
+Set in `backend/.env`:
 ```env
 USE_MOCKS=true
 ```
 
-### Mock-Modus deaktivieren (Produktion simulieren)
+All AWS services are replaced:
 
-Setze in `backend/.env`:
+| Service | Mock Behavior |
+|---------|---------------|
+| **DynamoDB** | In-memory storage with sample data (3 users, 3 games) |
+| **ElastiCache (Redis/Valkey)** | In-memory queue for matchmaking |
+| **AWS Secrets Manager** | Loads OAuth credentials from `.env` |
+| **OAuth** | Still uses real Google OAuth (requires credentials) |
 
+**Benefits:**
+- ✅ No AWS account needed (except for Google OAuth)
+- ✅ Fast startup (~1 second)
+- ✅ Deterministic test data
+- ✅ No latency from AWS services
+- ✅ Works offline (except OAuth)
+
+### Production Mode (Full AWS)
+
+Set in `backend/.env`:
 ```env
 USE_MOCKS=false
 AWS_ACCESS_KEY_ID=your-key
 AWS_SECRET_ACCESS_KEY=your-secret
 AWS_REGION=eu-central-1
-REDIS_ENDPOINT=localhost:6379
+REDIS_ENDPOINT=localhost:6379  # or ElastiCache endpoint
+DYNAMODB_TABLE_USERS=CookieUsers
+DYNAMODB_TABLE_GAMES=CookieGames
+GOOGLE_OAUTH_SECRET_NAME=overcookied/google-oauth
 ```
 
 ---
 
-## Voraussetzungen
+## System Requirements
 
-- Go 1.24+
-- Node.js 20+
-- Google Cloud Console Zugang (für OAuth)
-
+- **Go**: 1.24.9 or higher
 ---
 
-## 1. Google OAuth für localhost konfigurieren
+## Google OAuth Configuration
 
-### 1.1 Google Cloud Console öffnen
+### 1. Get OAuth Credentials
 
-1. Gehe zu [Google Cloud Console - Credentials](https://console.cloud.google.com/apis/credentials)
-2. Wähle das Projekt mit den bestehenden OAuth Credentials
-3. Klicke auf die OAuth 2.0 Client ID (Web application)
+1. Go to [Google Cloud Console - Credentials](https://console.cloud.google.com/apis/credentials)
+2. Select or create an OAuth 2.0 Client ID (Web application)
+3. Add authorized URIs:
 
-### 1.2 Localhost URLs hinzufügen
-
-**Autorisierte JavaScript-Quellen** - Füge hinzu:
+**Authorized JavaScript Origins:**
 ```
 http://localhost:3000
 http://localhost:8080
 ```
 
-**Autorisierte Weiterleitungs-URIs** - Füge hinzu:
+**Authorized Redirect URIs:**
 ```
 http://localhost:8080/auth/google/callback
 ```
 
-⚠️ **Wichtig:** Die Produktions-URLs (`https://overcookied.de`) NICHT entfernen!
+4. Copy **Client ID** and **Client Secret**
 
----
-
-## 2. Backend einrichten
-
-### 2.1 Environment Variablen
+### 2. Backend Setup
 
 ```bash
 cd backend
-cp .env.example .env
-```
+# Create .env (copy template if it exists)
+cat > .env << 'EOF'
+# Google OAuth Credentials
+GOOGLE_CLIENT_ID=your-client-id-here
+GOOGLE_CLIENT_SECRET=your-client-secret-here
 
-Bearbeite `.env` und setze deine Google OAuth Credentials:
-
-```env
-# Google OAuth Credentials (aus Google Cloud Console)
-GOOGLE_CLIENT_ID=123456789-abc.apps.googleusercontent.com
-GOOGLE_CLIENT_SECRET=GOCSPX-xxxxx
-
-# Redirect URL für OAuth Callback
+# Local OAuth callback
 GOOGLE_REDIRECT_URL=http://localhost:8080/auth/google/callback
 
-# JWT Secret (beliebiger String)
-JWT_SECRET=mein-lokales-jwt-secret-12345
+# JWT Secret (any random string)
+JWT_SECRET=local-jwt-secret-change-in-production
 
-# Frontend URL (kein trailing slash!)
+# Frontend URL (no trailing slash)
 FRONTEND_URL=http://localhost:3000
 
 # Port
 PORT=8080
 
-# Mock Mode (true für lokale Entwicklung ohne AWS)
+# Mock Mode (true for local dev without AWS)
 USE_MOCKS=true
-```
+EOF
 
-### 2.2 Backend starten
-
-```bash
-cd backend
+# Run backend
 go run .
 ```
 
-Das Backend startet auf `http://localhost:8080`
-
-Du solltest folgende Logs sehen:
+Expected output:
 ```
-[MOCK] In-memory DynamoDB initialized for local development
-[MOCK] Seeded 3 users and 3 games for local development
-[MOCK] In-memory Redis/Valkey initialized for local development
-[REDIS] Running in MOCK MODE - using in-memory matchmaking
+Connected to OAuth provider
+[MOCK] In-memory DynamoDB initialized
+[MOCK] In-memory Redis initialized for matchmaking
+Server starting on port 8080
 ```
 
----
-
-## 3. Frontend einrichten
-
-### 3.1 Dependencies installieren
+### 3. Frontend Setup
 
 ```bash
 cd frontend
 npm install
-```
 
-### 3.2 Environment Variablen
+# Create .env.local
+echo "NEXT_PUBLIC_API_URL=http://localhost:8080" > .env.local
 
-Erstelle `frontend/.env.local`:
-
-```env
-NEXT_PUBLIC_API_URL=http://localhost:8080
-```
-
-### 3.3 Development Server starten
-
-```bash
+# Start dev server
 npm run dev
 ```
 
-Das Frontend startet auf `http://localhost:3000`
+Visit `http://localhost:3000`
 
 ---
 
-## 4. Features testen
+## Testing Flows
 
-### 4.1 OAuth Login
+### Login Flow
+1. Visit `http://localhost:3000`
+2. Click "Login with Google"
+3. Authenticate with your Google account
+4. Redirected to dashboard with JWT token stored
 
-1. Öffne `http://localhost:3000/login`
-2. Klicke auf "Continue with Google"
-3. Nach erfolgreichem Login wirst du zum Dashboard weitergeleitet
+### Matchmaking
+1. Open two browser windows (or incognito)
+2. Log in with different Google accounts
+3. Click "Find Match" in both
+4. Game starts automatically with 5-second countdown
 
-### 4.2 Matchmaking (Single-Player Test)
-
-Mit Mock-Modus kannst du Matchmaking testen, indem du:
-1. Zwei Browser-Fenster öffnest (oder normales + Inkognito)
-2. In beiden einloggst (verschiedene Google-Accounts oder gleicher)
-3. In beiden auf "Find Match" klickst
-
-### 4.3 Leaderboard
-
-Das Leaderboard zeigt die Mock-Benutzer:
-- Alice Baker (1500 Punkte)
-- Bob Chef (1200 Punkte)
-- Charlie Cook (900 Punkte)
-
-### 4.4 Game History
-
-Die Game History zeigt Sample-Spiele für den Mock-Modus.
+### Leaderboard (Mock Data)
+- Alice Baker: 1,500 points
+- Bob Chef: 1,200 points
+- Charlie Cook: 900 points
 
 ---
 
-## 5. Troubleshooting
+## Troubleshooting
 
-### OAuth Redirect funktioniert nicht
-
-1. **Prüfe Google Cloud Console:** Sind `http://localhost:8080/auth/google/callback` und `http://localhost:3000` autorisiert?
-2. **Prüfe .env:** Ist `GOOGLE_REDIRECT_URL=http://localhost:8080/auth/google/callback` gesetzt?
-3. **Prüfe Frontend .env.local:** Ist `NEXT_PUBLIC_API_URL=http://localhost:8080` gesetzt?
-
-### "redirect_uri_mismatch" Fehler
-
-Die Redirect-URL in der `.env` muss **exakt** mit der in Google Cloud Console übereinstimmen.
-
-### CORS-Fehler
-
-Das Backend erlaubt automatisch Anfragen von `FRONTEND_URL`. Stelle sicher, dass:
-- `FRONTEND_URL=http://localhost:3000` (ohne trailing slash!)
-- Frontend tatsächlich auf Port 3000 läuft
-
-### DynamoDB/Redis Fehler
-
-Wenn du nicht im Mock-Modus bist (`USE_MOCKS=false`):
-- AWS Credentials müssen korrekt konfiguriert sein
-- Redis muss auf `localhost:6379` laufen (oder `REDIS_ENDPOINT` setzen)
+| Error | Solution |
+|-------|----------|
+| `redirect_uri_mismatch` | OAuth callback URL in .env must exactly match Google Console |
+| CORS errors | Check `FRONTEND_URL` env var (must be `http://localhost:3000` without trailing slash) |
+| "Failed to fetch" | Verify backend is running on port 8080 and `NEXT_PUBLIC_API_URL` is correct |
+| WebSocket errors | Usually caused by CORS - verify frontend and backend URLs match |
+| Mock mode not working | Ensure `USE_MOCKS=true` in `.env` |
 
 ---
 
-## 6. Entwicklungs-Workflow
-
-### Code-Änderungen
-
-- **Backend:** Stoppe mit `Ctrl+C` und starte neu mit `go run .`
-- **Frontend:** Hot-Reload ist aktiviert, Änderungen werden automatisch übernommen
-
-### Mock-Daten anpassen
-
-Bearbeite `backend/mocks/dynamo_mock.go` Funktion `seedData()` um andere Testdaten zu laden.
-
----
-
-## 7. Nützliche Befehle
+## Useful Commands
 
 ```bash
-# Backend bauen
+# Backend: Run tests
+cd backend && go test ./...
+
+# Backend: Format code
+go fmt ./...
+
+# Frontend: Run linter
+cd frontend && npm run lint
+
+# Frontend: Build for production
+npm run build
+
+# Check Go version
+go version
+
+# Check Node version
+node --version
+```
+
+---
+
+## Architecture Diagram (Local)
+
+```
+Frontend (React 19)          Backend (Go 1.24)
+├─ page.tsx                 ├─ main.go (HTTP server)
+├─ game/                    ├─ game.go (game logic)
+├─ hooks/                   ├─ websocket.go (WS hub)
+│  └─ useGameSocket.ts      ├─ auth.go (JWT + OAuth)
+└─ lib/auth.ts              ├─ db/dynamo.go (DynamoDB)
+     │                      └─ redis.go (matchmaking)
+     │ HTTP/WebSocket         │
+     └──────────────────────┘
+         (localhost:3000→8080)
+                │
+     ┌──────────┴──────────┐
+     │                     │
+  DynamoDB            ElastiCache
+  (Mock)              (Mock)
 cd backend && go build .
 
 # Backend Tests

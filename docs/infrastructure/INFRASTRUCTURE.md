@@ -57,7 +57,7 @@ Hier wird es spannend. Dieser Code baut das eigentliche Cluster *in* das Fundame
         *   *Scaling Config:* Wir erlauben 1-3 Server. Wenn viel los ist, startet AWS automatisch neue Server (Auto-Scaling).
     *   `aws_iam_role`: Digitale Ausweise. EKS braucht Rechte, um EC2-Server zu starten. Die Nodes brauchen Rechte, um Images aus dem ECR zu ziehen.
 
-#### 5. `irsa.tf` (IAM Roles for Service Accounts) ⭐️ *Sehr wichtig*
+#### 5. `irsa.tf` (IAM Roles for Service Accounts)
 *   **Was ist das?** Eine Brücke zwischen Kubernetes und AWS-Rechten.
 *   **Warum?** Früher gab man dem *ganzen Server* Administrator-Rechte. Das ist gefährlich. Mit IRSA geben wir *nur dem einzelnen Pod* Rechte.
 *   **Details:**
@@ -95,7 +95,7 @@ Hier wird es spannend. Dieser Code baut das eigentliche Cluster *in* das Fundame
     *   `valkey_endpoint`: Die Adresse des ElastiCache Valkey Clusters für Redis-Verbindungen.
     *   `valkey_port`: Der Port (6379) für Valkey-Verbindungen.
 
-#### 12. `elasticache.tf` (Distributed State) ⭐️ *Neu*
+#### 12. `elasticache.tf` (Distributed State)
 *   **Was ist das?** AWS ElastiCache mit Valkey 8.0 als verteilter Cache für Matchmaking und Game State.
 *   **Warum brauchen wir das?** Ohne ElastiCache würde jeder Backend-Pod seinen eigenen Matchmaking-Queue haben. Spieler auf Pod A würden nie mit Spielern auf Pod B gematcht werden.
 *   **Wichtige Ressourcen:**
@@ -131,7 +131,7 @@ Wenn Terraform fertig ist, steht nur die leere Hülle (das Cluster). Die YAML-Da
 #### 8. `namespace.yaml`
 *   **Was ist das?** Ein virtueller Arbeitsbereich namens `overcookied`. Es trennt deine App von System-Dingen.
 
-#### 9. `ingress.yaml` (Der Türsteher) ⭐️ *Zentrales Element*
+#### 9. `ingress.yaml` (Der Türsteher)
 *   **Was ist das?** Die Routing-Regeln für den AWS Load Balancer.
 *   **Funktion:**
     *   Kommt eine Anfrage an `/api`? ➡️ Schick sie zum Backend.

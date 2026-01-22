@@ -1,1 +1,0 @@
-Für das Userboard schicke keine email und userid mit. So kann man einfach den ganzen user aus dem code inspector rauslesen. Mach das sicherer.

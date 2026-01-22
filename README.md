@@ -1,191 +1,178 @@
-# Overcookied
+# Overcookied 🍪
 
-A modern multiplayer Cookie Clicker game built with Next.js 16 (frontend) and Go (backend), deployable on AWS EKS.
+A production-ready **real-time multiplayer Cookie Clicker game** with distributed architecture, cloud-native deployment, and 1v1 competitive gameplay.
 
-## 🎮 Features
+## About
 
-- **Real-time Multiplayer**: WebSocket-based game sessions
-- **Google OAuth**: Secure authentication
-- **Leaderboard**: Global rankings with DynamoDB persistence
-- **Game History**: Track all your matches
-- **Production-Ready**: EKS deployment with Terraform IaC
+Overcookied is a modern take on the classic Cookie Clicker game. Players compete in real-time 1v1 matches to bake the most cookies in 60 seconds. The system features:
+- **Real-time synchronization** via WebSockets (distributed across pods)
+- **Distributed matchmaking** using Redis (ElastiCache/Valkey)
+- **Secure authentication** with Google OAuth 2.0 + JWT tokens
+- **Persistent leaderboards** backed by AWS DynamoDB
+- **Horizontal scaling** with Kubernetes HPA auto-scaling
+- **Production-ready** deployment on AWS EKS
 
-## 🏗️ Architecture
+## 🚀 Quick Start Guide
 
-### Application Stack
-- **Frontend**: Next.js 16.0.3 with React 19 and Tailwind CSS
-- **Backend**: Go HTTP server with WebSocket support (Gorilla)
-- **Database**: AWS DynamoDB (serverless)
-- **Authentication**: Google OAuth 2.0
-
-### AWS Infrastructure (EKS)
-- **Base Layer** (persistent): VPC, ECR repositories
-- **EKS Layer** (ephemeral): EKS cluster, managed node groups, ALB ingress
-- **Security**: IRSA (IAM Roles for Service Accounts) for DynamoDB access
-- **Cost-Optimized**: Public nodes, no NAT Gateway (~€30-50/month)
-
-## 📁 Project Structure
-
-```
-overcookied/
-├── frontend/              # Next.js application
-│   ├── app/               # Next.js app directory
-│   ├── public/            # Static assets
-│   └── Dockerfile
-├── backend/               # Go backend application
-│   ├── main.go            # HTTP server & WebSocket
-│   ├── db/                # DynamoDB integration
-│   └── Dockerfile
-├── infra/                 # Terraform Infrastructure as Code
-│   ├── base/              # VPC, ECR (persistent)
-│   └── eks/               # EKS cluster (ephemeral)
-├── k8s/                   # Kubernetes manifests
-│   ├── backend/           # Backend deployment, service, HPA
-│   ├── frontend/          # Frontend deployment, service
-│   └── ingress.yaml       # ALB ingress configuration
-├── scripts/               # Deployment automation (PowerShell)
-└── DEPLOYMENT.md          # Detailed deployment guide
-```
-
-## 🚀 Quick Start (Local Development)
-
-### Frontend
+### Local Development (2 minutes with mocks)
 
 ```bash
+# Terminal 1: Backend
+cd backend
+go run .
+
+# Terminal 2: Frontend
 cd frontend
 npm install
 npm run dev
 ```
 
-Visit http://localhost:3000
+Visit `http://localhost:3000` → Login with Google → Play!
 
-### Backend
-
-```bash
-cd backend
-go run .
-```
-
-Visit http://localhost:8080/health
-
-## ☁️ AWS EKS Deployment
-
-### Prerequisites
-
-- AWS CLI (configured)
-- Terraform >= 1.9
-- kubectl >= 1.30
-- Docker
-- Helm >= 3.16
-
-### Quick Deploy
+### AWS EKS Deployment (45-60 minutes)
 
 ```powershell
-# 1. Bootstrap (one-time)
+# 1. Bootstrap AWS resources (one-time)
 .\scripts\bootstrap-state.ps1
 .\scripts\create-oauth-secret.ps1
 
-# 2. Deploy Base Infrastructure
-cd infra\base
-terraform init
-terraform apply
+# 2. Deploy infrastructure
+cd infra\base && terraform apply
+cd ..\eks && terraform apply
 
-# 3. Build & Push Images
-cd ..\..
+# 3. Build and deploy application
 .\scripts\build-and-push.ps1
-
-# 4. Deploy EKS Cluster
-cd infra\eks
-terraform init
-terraform apply
-
-# 5. Deploy Application
-cd ..\..
-.\scripts\deploy-app.ps1
+kubectl apply -f k8s\
 ```
 
-**Detailed instructions**: See [DEPLOYMENT.md](DEPLOYMENT.md)
+## 🛠️ Tech Stack
 
-## 🗑️ Destroy Infrastructure
+| Layer | Technologies |
+|-------|--------------|
+| **Frontend** | Next.js 16.0.3 • React 19 • TypeScript 5 • Tailwind CSS 4 |
+| **Backend** | Go 1.24.9 • Gorilla WebSocket 1.5.3 • JWT v5.2.1 |
+| **Database** | AWS DynamoDB (serverless) |
+| **Caching & State** | AWS ElastiCache (Valkey 8.0) • Redis Pub/Sub |
+| **Authentication** | Google OAuth 2.0 • HS256 JWT (24h expiration) |
+| **Infrastructure** | Terraform 1.9+ • Kubernetes 1.30+ • EKS • ECR |
+| **Container Runtime** | Docker • AWS EKS Managed Nodes |
 
-```powershell
-# Destroy only EKS (keeps VPC & ECR)
-.\scripts\destroy-eks.ps1
+## 📐 Architecture Overview
 
-# Later recreate EKS (fast, uses existing VPC/ECR)
-cd infra\eks
-terraform apply
-```
-
-## 🔒 Security Features
-
-✅ **IRSA**: No AWS credentials in containers  
-✅ **Secrets Manager**: OAuth credentials stored securely  
-✅ **Security Groups**: Minimal attack surface  
-✅ **Resource Limits**: Prevents resource exhaustion  
-✅ **ECR Scanning**: Automated vulnerability detection  
-
-## 📊 Architecture Diagram
+### System Components
 
 ```
-┌─────────────────────────────────────────────────────────┐
-│ Application Load Balancer (ALB)                         │
-│ http://<alb-dns>/                                       │
-└──────────────┬──────────────────────────────────────────┘
-               │
-       ┌───────┴────────┐
-       │                │
-┌──────▼───────┐ ┌─────▼────────┐
-│  Frontend    │ │   Backend    │
-│  (Next.js)   │ │   (Go)       │
-│  Port 3000   │ │   Port 8080  │
-│              │ │   WebSocket  │
-└──────────────┘ └──────┬───────┘
-                        │
-                ┌───────┴────────┐
-                │   IRSA Role    │
-                └───────┬────────┘
-                        │
-            ┌───────────▼──────────────┐
-            │    DynamoDB Tables       │
-            │  - CookieUsers           │
-            │  - CookieGames           │
-            └──────────────────────────┘
+┌─────────────────────────────────────────────────────┐
+│           AWS Application Load Balancer              │
+│                  (ALB Ingress)                       │
+└────────────┬─────────────────────────────┬──────────┘
+             │                             │
+      ┌──────▼──────┐             ┌────────▼────────┐
+      │  Frontend   │             │    Backend      │
+      │ (Next.js)   │             │   (Go + WS)     │
+      │ Port 3000   │             │  Port 8080      │
+      └─────────────┘             └────────┬────────┘
+                                           │
+                                  ┌────────▼────────┐
+                                  │  IRSA IAM Role  │
+                                  └────────┬────────┘
+                                           │
+                    ┌──────────────────────┼──────────────────────┐
+                    │                      │                      │
+            ┌───────▼────────┐   ┌────────▼─────────┐  ┌─────────▼──────┐
+            │   DynamoDB     │   │  ElastiCache     │  │  Secrets Mgr   │
+            │   Tables       │   │  (Valkey 8.0)    │  │  (OAuth creds) │
+            │ • CookieUsers  │   │ • Matchmaking    │  └────────────────┘
+            │ • CookieGames  │   │ • Pub/Sub events │
+            └────────────────┘   └──────────────────┘
 ```
 
-## 💰 Cost Estimate (eu-central-1)
+### Key Data Flows
 
-- **EKS Control Plane**: ~€73/month
-- **EC2 Nodes (2x t3.medium)**: ~€60/month
-- **ALB**: ~€20/month
-- **DynamoDB On-Demand**: ~€1-5/month (low traffic)
-- **ECR Storage**: ~€1/month
-- **NAT Gateway**: €0 (using public nodes)
+**Authentication**:
+1. User → Google OAuth login
+2. Backend → Issue JWT token
+3. Client → Store in localStorage
+4. WebSocket → Authenticate with JWT query parameter
 
-**Total**: ~€155/month (can be reduced to €30-50/month by destroying EKS when not in use)
+**Game Session**:
+1. Players → Join matchmaking queue (Redis Sorted Set)
+2. Matchmaking Loop → Detect 2 players, create GameRoom
+3. Pub/Sub → Notify both pods of match start
+4. WebSocket → Real-time score/time synchronization
+5. DynamoDB → Persist game result and leaderboard
+
+**Distributed State**:
+- Game state stored in Redis (survives pod restarts)
+- LocalStoreage in frontend (optimistic UI updates)
+- Backend reconciliation every 1 second
+- DynamoDB final persistence after match ends
+
+## 📁 Project Structure
+
+```
+overcookied/
+├── frontend/           # Next.js 16 application
+│   ├── app/            # Pages & components
+│   ├── hooks/          # useGameSocket (WebSocket logic)
+│   └── lib/            # Auth utilities
+├── backend/            # Go API + WebSocket server
+│   ├── main.go         # HTTP routes & entry point
+│   ├── game.go         # Game engine & room management
+│   ├── websocket.go    # WebSocket pump model
+│   ├── auth.go         # OAuth + JWT
+│   ├── redis.go        # Matchmaking & distributed state
+│   └── db/             # DynamoDB integration
+├── infra/              # Terraform IaC
+│   ├── base/           # VPC, ECR (persistent)
+│   └── eks/            # EKS, ElastiCache, ALB (ephemeral)
+├── k8s/                # Kubernetes manifests
+│   ├── backend/        # Deployment, Service, HPA
+│   └── frontend/       # Deployment, Service
+├── docs/               # Comprehensive documentation
+└── scripts/            # Deployment automation
+```
+
+## 🔒 Security
+
+✅ **Authentication**: Google OAuth 2.0 + JWT (HS256)  
+✅ **Secrets**: AWS Secrets Manager for OAuth credentials  
+✅ **IAM**: IRSA (no credentials in containers)  
+✅ **Network**: Security groups, ingress policies  
+✅ **TLS**: ALB with optional certificate support
+
+## 🎮 Features
+
+✅ Real-time 1v1 multiplayer matches  
+✅ Distributed matchmaking (100+ concurrent players)  
+✅ Golden Cookie special events  
+✅ Leaderboard with persistent rankings  
+✅ Game history tracking  
+✅ Google OAuth integration  
+✅ Horizontal auto-scaling (HPA)  
+✅ Mock mode for local development  
 
 ## 🛠️ Customization
 
-### Change Node Instance Type
+### Change Cluster Size
 
 Edit `infra/eks/terraform.tfvars`:
-
 ```hcl
-node_instance_types = ["t3.small"]  # Smaller for cost savings
-node_desired_size   = 1              # Reduce replicas
+node_instance_types = ["t3.small"]     # Smaller instances
+node_desired_size   = 1                 # Fewer nodes
 ```
 
 ### Enable HTTPS
 
 1. Create ACM certificate in AWS Console
-2. Uncomment TLS annotations in `k8s/ingress.yaml`
-3. Update `alb.ingress.kubernetes.io/certificate-arn`
+2. Uncomment TLS section in `k8s/ingress.yaml`
+3. Update certificate ARN
 
 ### Add Custom Domain
 
 1. Create Route53 hosted zone
-2. Update `k8s/ingress.yaml` with domain in `spec.rules[].host`
-3. Create CNAME record pointing to ALB DNS
+2. Update `k8s/ingress.yaml` with domain
+3. Add CNAME record to ALB DNS
 
 ## 📝 License
 
@@ -193,7 +180,7 @@ MIT
 
 ## 🤝 Contributing
 
-Pull requests welcome! Please ensure your changes pass:
-- Go tests: `go test ./...`
-- Terraform validation: `terraform validate`
-- Kubernetes dry-run: `kubectl apply --dry-run=client`
+Pull requests welcome! Ensure changes pass:
+- `go test ./...` (backend)
+- `npm run lint` (frontend)
+- `terraform validate` (infrastructure)
