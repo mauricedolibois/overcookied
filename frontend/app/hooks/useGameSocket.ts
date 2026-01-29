@@ -1,23 +1,18 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { UserSession } from '@/lib/auth';
 
-// WebSocket URL is computed at connection time to avoid build-time evaluation
-// In development, NEXT_PUBLIC_API_URL points to localhost:8080 (backend)
-// In production, it's empty so we derive from window.location
-const getWsUrl = (): string => {
-    const apiUrl = process.env.NEXT_PUBLIC_API_URL;
+export const getWsUrl = (apiUrl?: string, windowLocation?: { protocol: string; host: string }): string => {
+    const envApiUrl = apiUrl ?? process.env.NEXT_PUBLIC_API_URL;
     
-    // Development: Use API URL for WebSocket (localhost:8080)
-    if (apiUrl) {
-        const wsProtocol = apiUrl.startsWith('https') ? 'wss:' : 'ws:';
-        // Extract host from API URL (e.g., "http://localhost:8080" -> "localhost:8080")
-        const host = apiUrl.replace(/^https?:\/\//, '');
+    if (envApiUrl) {
+        const wsProtocol = envApiUrl.startsWith('https') ? 'wss:' : 'ws:';
+        const host = envApiUrl.replace(/^https?:\/\//, '');
         return `${wsProtocol}//${host}/ws`;
     }
     
-    // Production: Derive WebSocket URL from current browser location
-    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    return `${protocol}//${window.location.host}/ws`;
+    const loc = windowLocation ?? window.location;
+    const protocol = loc.protocol === 'https:' ? 'wss:' : 'ws:';
+    return `${protocol}//${loc.host}/ws`;
 };
 
 export type GameState = {

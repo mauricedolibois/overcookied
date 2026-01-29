@@ -1,145 +1,117 @@
 # Overcookied 🍪
 
-A production-ready **real-time multiplayer Cookie Clicker game** with distributed architecture, cloud-native deployment, and 1v1 competitive gameplay.
+Ein Echtzeit-Multiplayer Cookie Clicker Spiel mit verteilter Architektur auf AWS EKS.
 
-## About
+## Was ist Overcookied?
 
-Overcookied is a modern take on the classic Cookie Clicker game. Players compete in real-time 1v1 matches to bake the most cookies in 60 seconds. The system features:
-- **Real-time synchronization** via WebSockets (distributed across pods)
-- **Distributed matchmaking** using Redis (ElastiCache/Valkey)
-- **Secure authentication** with Google OAuth 2.0 + JWT tokens
-- **Persistent leaderboards** backed by AWS DynamoDB
-- **Horizontal scaling** with Kubernetes HPA auto-scaling
-- **Production-ready** deployment on AWS EKS
+Zwei Spieler treten gegeneinander an, um in 60 Sekunden die meisten Cookies zu backen. Klick schnell, fang goldene Cookies (+5 Punkte) und klettere in der Rangliste!
 
-## 🚀 Quick Start Guide
+**Features:**
+- Echtzeit 1v1-Matches via WebSockets
+- Google OAuth Login mit JWT Sessions
+- Verteiltes Matchmaking über mehrere Pods (Redis/Valkey)
+- Persistente Bestenlisten (DynamoDB)
+- Auto-Scaling Kubernetes Deployment
 
-### Local Development (2 minutes with mocks)
+## Schnellstart
+
+### Lokale Entwicklung
 
 ```bash
-# Terminal 1: Backend
+# Backend (Terminal 1)
 cd backend
 go run .
 
-# Terminal 2: Frontend
+# Frontend (Terminal 2)
 cd frontend
-npm install
-npm run dev
+npm install && npm run dev
 ```
 
-Visit `http://localhost:3000` → Login with Google → Play!
+Öffne `http://localhost:3000` → Mit Google einloggen → Spielen!
 
-### AWS EKS Deployment (45-60 minutes)
+> **Hinweis:** Im lokalen Modus werden In-Memory Mocks für Redis und DynamoDB verwendet.
 
-```powershell
-# 1. Bootstrap AWS resources (one-time)
-.\scripts\bootstrap-state.ps1
-.\scripts\create-oauth-secret.ps1
+### Tests ausführen
 
-# 2. Deploy infrastructure
-cd infra\base && terraform apply
-cd ..\eks && terraform apply
+```bash
+# Backend
+cd backend && go test ./... -v
 
-# 3. Build and deploy application
-.\scripts\build-and-push.ps1
-kubectl apply -f k8s\
+# Frontend
+cd frontend && npm test
 ```
 
-## 🛠️ Tech Stack
+## Tech Stack
 
-| Layer | Technologies |
-|-------|--------------|
-| **Frontend** | Next.js 16.0.3 • React 19 • TypeScript 5 • Tailwind CSS 4 |
-| **Backend** | Go 1.24.9 • Gorilla WebSocket 1.5.3 • JWT v5.2.1 |
-| **Database** | AWS DynamoDB (serverless) |
-| **Caching & State** | AWS ElastiCache (Valkey 8.0) • Redis Pub/Sub |
-| **Authentication** | Google OAuth 2.0 • HS256 JWT (24h expiration) |
-| **Infrastructure** | Terraform 1.9+ • Kubernetes 1.30+ • EKS • ECR |
-| **Container Runtime** | Docker • AWS EKS Managed Nodes |
+| Schicht | Technologie |
+|---------|-------------|
+| Frontend | Next.js 16, React 19, TypeScript, Tailwind CSS |
+| Backend | Go 1.24, Gorilla WebSocket, JWT |
+| Datenbank | AWS DynamoDB |
+| Cache | AWS ElastiCache (Valkey 8.0) |
+| Auth | Google OAuth 2.0 |
+| Infra | Terraform, Kubernetes, AWS EKS |
 
-## 📐 Architecture Overview
-
-### System Components
+## Architektur
 
 ```
-┌─────────────────────────────────────────────────────┐
-│           AWS Application Load Balancer              │
-│                  (ALB Ingress)                       │
-└────────────┬─────────────────────────────┬──────────┘
-             │                             │
-      ┌──────▼──────┐             ┌────────▼────────┐
-      │  Frontend   │             │    Backend      │
-      │ (Next.js)   │             │   (Go + WS)     │
-      │ Port 3000   │             │  Port 8080      │
-      └─────────────┘             └────────┬────────┘
-                                           │
-                                  ┌────────▼────────┐
-                                  │  IRSA IAM Role  │
-                                  └────────┬────────┘
-                                           │
-                    ┌──────────────────────┼──────────────────────┐
-                    │                      │                      │
-            ┌───────▼────────┐   ┌────────▼─────────┐  ┌─────────▼──────┐
-            │   DynamoDB     │   │  ElastiCache     │  │  Secrets Mgr   │
-            │   Tables       │   │  (Valkey 8.0)    │  │  (OAuth creds) │
-            │ • CookieUsers  │   │ • Matchmaking    │  └────────────────┘
-            │ • CookieGames  │   │ • Pub/Sub events │
-            └────────────────┘   └──────────────────┘
+                    ┌─────────────────────┐
+                    │   AWS ALB Ingress   │
+                    └─────────┬───────────┘
+                              │
+            ┌─────────────────┼─────────────────┐
+            │                 │                 │
+     ┌──────▼──────┐   ┌──────▼──────┐   ┌──────▼──────┐
+     │  Frontend   │   │  Backend    │   │  Backend    │
+     │  (Next.js)  │   │  Pod 1      │   │  Pod N      │
+     └─────────────┘   └──────┬──────┘   └──────┬──────┘
+                              │                 │
+                    ┌─────────┴─────────────────┴─────────┐
+                    │                                     │
+             ┌──────▼──────┐                      ┌───────▼──────┐
+             │ ElastiCache │                      │   DynamoDB   │
+             │  (Valkey)   │                      │              │
+             └─────────────┘                      └──────────────┘
 ```
 
-### Key Data Flows
-
-**Authentication**:
-1. User → Google OAuth login
-2. Backend → Issue JWT token
-3. Client → Store in localStorage
-4. WebSocket → Authenticate with JWT query parameter
-
-**Game Session**:
-1. Players → Join matchmaking queue (Redis Sorted Set)
-2. Matchmaking Loop → Detect 2 players, create GameRoom
-3. Pub/Sub → Notify both pods of match start
-4. WebSocket → Real-time score/time synchronization
-5. DynamoDB → Persist game result and leaderboard
-
-**Distributed State**:
-- Game state stored in Redis (survives pod restarts)
-- LocalStoreage in frontend (optimistic UI updates)
-- Backend reconciliation every 1 second
-- DynamoDB final persistence after match ends
-
-## 📁 Project Structure
+## Projektstruktur
 
 ```
 overcookied/
-├── frontend/           # Next.js 16 application
-│   ├── app/            # Pages & components
-│   ├── hooks/          # useGameSocket (WebSocket logic)
-│   └── lib/            # Auth utilities
-├── backend/            # Go API + WebSocket server
-│   ├── main.go         # HTTP routes & entry point
-│   ├── game.go         # Game engine & room management
-│   ├── websocket.go    # WebSocket pump model
-│   ├── auth.go         # OAuth + JWT
-│   ├── redis.go        # Matchmaking & distributed state
-│   └── db/             # DynamoDB integration
-├── infra/              # Terraform IaC
-│   ├── base/           # VPC, ECR (persistent)
-│   └── eks/            # EKS, ElastiCache, ALB (ephemeral)
-├── k8s/                # Kubernetes manifests
-│   ├── backend/        # Deployment, Service, HPA
-│   └── frontend/       # Deployment, Service
-├── docs/               # Comprehensive documentation
-└── scripts/            # Deployment automation
+├── backend/          # Go API + WebSocket Server
+├── frontend/         # Next.js Anwendung
+├── infra/            # Terraform (base + eks)
+├── k8s/              # Kubernetes Manifeste
+├── scripts/          # Deployment Skripte
+└── docs/             # Dokumentation
 ```
 
-## 📝 License
+## Dokumentation
+
+| Dokument | Beschreibung |
+|----------|--------------|
+| [Local Development](docs/LOCAL_DEVELOPMENT.md) | Setup-Anleitung für lokale Entwicklung |
+| [Deployment](docs/DEPLOYMENT.md) | AWS EKS Deployment Schritte |
+| [Architecture](docs/architecture/ARCHITECTURE.md) | System-Design Details |
+| [Testing](docs/TESTING.md) | Test-Strategie und Befehle |
+| [Runbook](docs/RUNBOOK.md) | Betrieb und Fehlerbehebung |
+
+## AWS Deployment
+
+```powershell
+# 1. Setup (einmalig)
+.\scripts\bootstrap-state.ps1
+.\scripts\create-oauth-secret.ps1
+
+# 2. Infrastruktur
+cd infra\base && terraform apply
+cd ..\eks && terraform apply
+
+# 3. Deployment
+.\scripts\build-and-push.ps1
+.\scripts\deploy-app.ps1
+```
+
+## Lizenz
 
 MIT
-
-## 🤝 Contributing
-
-Pull requests welcome! Ensure changes pass:
-- `go test ./...` (backend)
-- `npm run lint` (frontend)
-- `terraform validate` (infrastructure)

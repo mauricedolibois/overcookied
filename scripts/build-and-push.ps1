@@ -7,6 +7,33 @@ $PROJECT_ROOT = (Get-Item $PSScriptRoot).Parent.FullName
 Write-Host "🐳 Building and Pushing Container Images to ECR..." -ForegroundColor Cyan
 Write-Host ""
 
+# =====================
+# Run Tests Before Build
+# =====================
+Write-Host "🧪 Running Backend Tests..." -ForegroundColor Yellow
+Push-Location "$PROJECT_ROOT\backend"
+go test ./... -v -short
+if ($LASTEXITCODE -ne 0) {
+    Write-Host "❌ Backend tests failed! Aborting build." -ForegroundColor Red
+    Pop-Location
+    exit 1
+}
+Pop-Location
+Write-Host "✅ Backend tests passed" -ForegroundColor Green
+Write-Host ""
+
+Write-Host "🧪 Running Frontend Tests..." -ForegroundColor Yellow
+Push-Location "$PROJECT_ROOT\frontend"
+npm test
+if ($LASTEXITCODE -ne 0) {
+    Write-Host "❌ Frontend tests failed! Aborting build." -ForegroundColor Red
+    Pop-Location
+    exit 1
+}
+Pop-Location
+Write-Host "✅ Frontend tests passed" -ForegroundColor Green
+Write-Host ""
+
 # Get Account ID
 $ACCOUNT_ID = (aws sts get-caller-identity --query Account --output text)
 Write-Host "📋 AWS Account ID: $ACCOUNT_ID" -ForegroundColor White

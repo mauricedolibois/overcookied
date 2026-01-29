@@ -798,9 +798,6 @@ func (gm *GameManager) StartGame(p1, p2 *Client) {
 	go room.Run()
 }
 
-// NOTE: We need to link Client to Room to route CLICK events.
-// I will add a map to GameManager for this purpose.
-
 func (room *GameRoom) Run() {
 	// Broadcast initial state so clients know game is starting (and see initial time)
 	room.broadcastState()
@@ -875,7 +872,6 @@ func (room *GameRoom) SpawnGoldenCookie() {
 }
 
 func (room *GameRoom) EndGame() {
-	// Determine Winner
 	p1Won := room.State.P1Score > room.State.P2Score
 	var winnerID string
 	if p1Won {
@@ -927,9 +923,7 @@ func (room *GameRoom) HandleGameMessage(client *Client, msg GameMessage) {
 
 	switch msg.Type {
 	case MsgTypeClick:
-		// Regular click
 		points := 1
-		// Check double click powerup
 		if expiry, ok := room.DoubleClickActive[client.userID]; ok && time.Now().Before(expiry) {
 			points = 2
 		}
@@ -1000,8 +994,6 @@ func (room *GameRoom) HandleGameMessage(client *Client, msg GameMessage) {
 
 	case MsgTypeQuit:
 		log.Printf("Processing QUIT_GAME from user: %s", client.userID)
-		// Client requested to quit
-		// Treat as "Resigned" -> Opponent wins or just Game Over
 		otherPlayer := room.Player1
 		if client == room.Player1 {
 			otherPlayer = room.Player2
@@ -1014,7 +1006,6 @@ func (room *GameRoom) HandleGameMessage(client *Client, msg GameMessage) {
 		}
 		bytes, _ := json.Marshal(msg)
 
-		// Non-blocking sends
 		select {
 		case room.Player1.send <- bytes:
 		default:

@@ -113,7 +113,6 @@ func (m *MockRedis) AddToQueue(userID, name, picture string) error {
 		return m.queue[i].JoinedAt < m.queue[j].JoinedAt
 	})
 
-	log.Printf("[MOCK] Player added to queue: %s (%s) - Queue size: %d", name, userID, len(m.queue))
 	return nil
 }
 
@@ -125,7 +124,6 @@ func (m *MockRedis) RemoveFromQueue(userID string) error {
 	for i, entry := range m.queue {
 		if entry.UserID == userID {
 			m.queue = append(m.queue[:i], m.queue[i+1:]...)
-			log.Printf("[MOCK] Player removed from queue: %s - Queue size: %d", userID, len(m.queue))
 			break
 		}
 	}

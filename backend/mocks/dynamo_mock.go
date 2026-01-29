@@ -109,7 +109,6 @@ func (m *MockDynamoDB) SaveUser(user CookieUser) error {
 		user.Score = existing.Score
 	}
 	m.users[user.UserID] = user
-	log.Printf("[MOCK] User saved: %s (%s)", user.Name, user.UserID)
 	return nil
 }
 
@@ -157,7 +156,6 @@ func (m *MockDynamoDB) IncrementUserScore(userID string, delta int) error {
 	}
 	user.Score += delta
 	m.users[userID] = user
-	log.Printf("[MOCK] User %s score updated: +%d (total: %d)", userID, delta, user.Score)
 	return nil
 }
 
@@ -169,7 +167,6 @@ func (m *MockDynamoDB) SaveGame(game CookieGame) error {
 	defer m.mu.Unlock()
 
 	m.games = append(m.games, game)
-	log.Printf("[MOCK] Game saved: %s (Player: %s, Score: %d)", game.GameID, game.PlayerID, game.Score)
 	return nil
 }
 

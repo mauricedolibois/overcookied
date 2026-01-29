@@ -45,7 +45,6 @@ const (
 
 // InitRedis initializes the Redis/Valkey connection
 func InitRedis() error {
-	// Check if we should use mocks
 	useMockRedis = mocks.IsMockMode()
 
 	if useMockRedis {
@@ -59,7 +58,6 @@ func InitRedis() error {
 		redisAddr = "localhost:6379" // Default for local dev
 	}
 
-	// Generate unique pod ID
 	hostname, _ := os.Hostname()
 	podID = fmt.Sprintf("%s_%d", hostname, time.Now().UnixNano())
 

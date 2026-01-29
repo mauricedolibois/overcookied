@@ -25,7 +25,6 @@ const (
 var upgrader = websocket.Upgrader{
 	ReadBufferSize:  1024,
 	WriteBufferSize: 1024,
-	// Allow all origins for now to avoid CORS issues during dev
 	CheckOrigin: func(r *http.Request) bool {
 		return true
 	},
@@ -58,7 +57,6 @@ func (c *Client) readPump() {
 			}
 			break
 		}
-		// Pass message to manager for processing
 		c.manager.handleMessage(c, message)
 	}
 }
@@ -75,7 +73,6 @@ func (c *Client) writePump() {
 		case message, ok := <-c.send:
 			c.conn.SetWriteDeadline(time.Now().Add(writeWait))
 			if !ok {
-				// The hub closed the channel.
 				c.conn.WriteMessage(websocket.CloseMessage, []byte{})
 				return
 			}
@@ -106,7 +103,6 @@ func serveWs(manager *GameManager, w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Authenticate using JWT token from query parameter
 	tokenString := r.URL.Query().Get("token")
 	if tokenString == "" {
 		log.Println("[WS] ERROR: No token provided for WebSocket connection")
@@ -115,7 +111,6 @@ func serveWs(manager *GameManager, w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Verify JWT token
 	claims, err := verifyJWT(tokenString)
 	if err != nil {
 		log.Printf("[WS] ERROR: Invalid JWT token: %v", err)
@@ -127,7 +122,6 @@ func serveWs(manager *GameManager, w http.ResponseWriter, r *http.Request) {
 	userID := claims.UserID
 	client := &Client{manager: manager, conn: conn, send: make(chan []byte, 256), userID: userID}
 
-	// Use claims data directly - already verified
 	client.name = claims.Name
 	client.picture = claims.Picture
 
@@ -135,8 +129,6 @@ func serveWs(manager *GameManager, w http.ResponseWriter, r *http.Request) {
 
 	client.manager.register <- client
 
-	// Allow collection of memory referenced by the caller by doing all work in
-	// new goroutines.
 	go client.writePump()
 	go client.readPump()
 }

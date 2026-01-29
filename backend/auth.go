@@ -203,34 +203,29 @@ func handleGoogleCallback(w http.ResponseWriter, r *http.Request) {
 
 	state := r.FormValue("state")
 	if state != expectedState {
-		log.Printf("[AUTH] ERROR: Invalid OAuth state - potential CSRF attack from IP: %s (expected: %s, got: %s)", r.RemoteAddr, expectedState[:10], state[:10])
+		log.Printf("[AUTH] ERROR: Invalid OAuth state - potential CSRF attack from IP: %s", r.RemoteAddr)
 		http.Redirect(w, r, fmt.Sprintf("%s/login?error=invalid_state", frontendURL), http.StatusTemporaryRedirect)
 		return
 	}
-	log.Printf("[AUTH] OAuth state validated successfully")
 
 	code := r.FormValue("code")
-	log.Printf("[AUTH] Exchanging authorization code for token")
 	token, err := googleOauthConfig.Exchange(context.Background(), code)
 	if err != nil {
 		log.Printf("[AUTH] ERROR: Code exchange failed: %s", err.Error())
 		http.Redirect(w, r, fmt.Sprintf("%s/login?error=exchange_failed", frontendURL), http.StatusTemporaryRedirect)
 		return
 	}
-	log.Printf("[AUTH] Successfully exchanged code for access token")
 
 	// Get user info from Google
-	log.Printf("[AUTH] Fetching user info from Google")
 	userInfo, err := getUserInfo(token.AccessToken)
 	if err != nil {
 		log.Printf("[AUTH] ERROR: Failed to get user info: %s", err.Error())
 		http.Redirect(w, r, fmt.Sprintf("%s/login?error=userinfo_failed", frontendURL), http.StatusTemporaryRedirect)
 		return
 	}
-	log.Printf("[AUTH] User info retrieved: Email=%s, Name=%s, ID=%s", userInfo.Email, userInfo.Name, userInfo.ID)
+	log.Printf("[AUTH] User authenticated: %s (%s)", userInfo.Name, userInfo.Email)
 
 	// Create JWT token
-	log.Printf("[AUTH] Generating JWT token for user: %s", userInfo.Email)
 	jwtToken, err := generateJWT(userInfo)
 	if err != nil {
 		log.Printf("[AUTH] ERROR: Failed to generate JWT: %s", err.Error())
@@ -247,14 +242,9 @@ func handleGoogleCallback(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := db.SaveUserWithMock(user); err != nil {
 		log.Printf("[AUTH] WARNING: Failed to save user to DB: %v", err)
-	} else {
-		log.Printf("[AUTH] User saved to database: %s", userInfo.Email)
 	}
 
-	log.Printf("[AUTH] JWT token generated successfully for user: %s", userInfo.Email)
-
 	// Redirect to frontend with JWT token
-	log.Printf("[AUTH] Redirecting user %s to frontend callback", userInfo.Email)
 	http.Redirect(w, r, fmt.Sprintf("%s/auth/callback?token=%s", frontendURL, jwtToken), http.StatusTemporaryRedirect)
 }
 

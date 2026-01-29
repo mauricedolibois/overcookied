@@ -63,7 +63,8 @@ if ($LASTEXITCODE -eq 0) {
 Write-Host ""
 Write-Host "✅ Verifying Base layer is intact..." -ForegroundColor Yellow
 Push-Location "$PROJECT_ROOT\infra\base"
-$resources = terraform state list
+terraform init -reconfigure -input=false *>$null
+$resources = terraform state list 2>$null
 Pop-Location
 if ($resources) {
     Write-Host "✅ Base layer resources still present:" -ForegroundColor Green
