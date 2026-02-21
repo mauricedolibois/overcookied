@@ -13,7 +13,7 @@ In Overcookied treten zwei zufällig ausgewählte Spieler in einem 60 Sekunden M
 - Persistente Bestenlisten (DynamoDB)
 - Auto-Scaling Kubernetes Deployment
 
-## Schnellstart
+## Quick Start Guide
 
 ### Lokale Entwicklung
 
