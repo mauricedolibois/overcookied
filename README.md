@@ -53,8 +53,7 @@ cd frontend && npm test
 | Infra | Terraform, Kubernetes, AWS EKS |
 
 ## Architektur
-(Bild)
-
+<img width="942" height="912" alt="AWS Architektur" src="https://github.com/user-attachments/assets/e98cdd6c-0336-43b5-8c28-92216462d4ca" />
 
 ## AWS Deployment
 
