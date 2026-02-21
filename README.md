@@ -4,7 +4,7 @@ Ein Echtzeit-Multiplayer Cookie Clicker Spiel mit verteilter Architektur auf AWS
 
 ## Was ist Overcookied?
 
-Zwei Spieler treten gegeneinander an, um in 60 Sekunden die meisten Cookies zu backen. Klick schnell, fang goldene Cookies (+5 Punkte) und klettere in der Rangliste!
+In Overcookied treten zwei zufällig ausgewählte Spieler in einem 60 Sekunden Match gegeneinander an. Wer am Ende die meisten Klicks hat, gewinnt. Zusätzlich spawnt alle 5-10 Sekunden ein “Golden Cookie”. Der Spieler, der zuerst auf den Golden Cookie klickt, erhält einen kurzen „Double Click”-Bonus, bei dem jeder Klick doppelt gewertet wird. Klick' so schnell du kannst und klettere in der Rangliste!
 
 **Features:**
 - Echtzeit 1v1-Matches via WebSockets
@@ -53,65 +53,76 @@ cd frontend && npm test
 | Infra | Terraform, Kubernetes, AWS EKS |
 
 ## Architektur
+(Bild)
 
-```
-                    ┌─────────────────────┐
-                    │   AWS ALB Ingress   │
-                    └─────────┬───────────┘
-                              │
-            ┌─────────────────┼─────────────────┐
-            │                 │                 │
-     ┌──────▼──────┐   ┌──────▼──────┐   ┌──────▼──────┐
-     │  Frontend   │   │  Backend    │   │  Backend    │
-     │  (Next.js)  │   │  Pod 1      │   │  Pod N      │
-     └─────────────┘   └──────┬──────┘   └──────┬──────┘
-                              │                 │
-                    ┌─────────┴─────────────────┴─────────┐
-                    │                                     │
-             ┌──────▼──────┐                      ┌───────▼──────┐
-             │ ElastiCache │                      │   DynamoDB   │
-             │  (Valkey)   │                      │              │
-             └─────────────┘                      └──────────────┘
-```
-
-## Projektstruktur
-
-```
-overcookied/
-├── backend/          # Go API + WebSocket Server
-├── frontend/         # Next.js Anwendung
-├── infra/            # Terraform (base + eks)
-├── k8s/              # Kubernetes Manifeste
-├── scripts/          # Deployment Skripte
-└── docs/             # Dokumentation
-```
-
-## Dokumentation
-
-| Dokument | Beschreibung |
-|----------|--------------|
-| [Local Development](docs/LOCAL_DEVELOPMENT.md) | Setup-Anleitung für lokale Entwicklung |
-| [Deployment](docs/DEPLOYMENT.md) | AWS EKS Deployment Schritte |
-| [Architecture](docs/architecture/ARCHITECTURE.md) | System-Design Details |
-| [Testing](docs/TESTING.md) | Test-Strategie und Befehle |
-| [Runbook](docs/RUNBOOK.md) | Betrieb und Fehlerbehebung |
 
 ## AWS Deployment
 
+### Voraussetzungen
+
+Folgende Tools müssen installiert und konfiguriert sein:
+
+| Tool | Version | Zweck |
+|------|---------|-------|
+| [AWS CLI](https://aws.amazon.com/cli/) | v2+ | AWS-Ressourcen verwalten |
+| [Terraform](https://www.terraform.io/) | >= 1.9 | Infrastruktur provisionieren |
+| [Docker](https://www.docker.com/) | 20+ | Container-Images bauen |
+| [kubectl](https://kubernetes.io/docs/tasks/tools/) | 1.31+ | Kubernetes-Cluster verwalten |
+| [Go](https://go.dev/) | 1.24+ | Backend bauen & testen |
+| [Node.js](https://nodejs.org/) | 22+ | Frontend bauen & testen |
+| [PowerShell](https://github.com/PowerShell/PowerShell) | 7+ | Deployment-Scripte ausführen |
+
+Außerdem wird benötigt:
+- **AWS Account** mit konfiguriertem `aws configure` (Access Key, Region `eu-central-1`)
+- **Google OAuth 2.0 Credentials** — erstellt in der [Google Cloud Console](https://console.cloud.google.com/apis/credentials) (OAuth 2.0 Client-ID vom Typ "Webanwendung")
+- **(Optional) Domain** — für HTTPS wird eine eigene Domain (z.B. `overcookied.de`) mit Route 53 Hosted Zone benötigt
+
+### AWS-Deployment Schritte
+
 ```powershell
-# 1. Setup (einmalig)
+# 1. Terraform State Backend einrichten (einmalig)
 .\scripts\bootstrap-state.ps1
+
+# 2. Google OAuth + JWT Secrets in AWS Secrets Manager anlegen (einmalig)
 .\scripts\create-oauth-secret.ps1
 
-# 2. Infrastruktur
-cd infra\base && terraform apply
-cd ..\eks && terraform apply
+# 3. Basis-Infrastruktur erstellen (VPC, ECR Repositories)
+cd infra\base
+terraform init
+terraform apply
+cd ..\..
 
-# 3. Deployment
+# 4. Docker-Images bauen, testen und in ECR pushen
 .\scripts\build-and-push.ps1
-.\scripts\deploy-app.ps1
+
+# 5. EKS-Cluster erstellen und Anwendung deployen
+.\scripts\create-cluster.ps1
 ```
 
-## Lizenz
+> **Hinweis:** `create-cluster.ps1` führt automatisch `deploy-app.ps1` und `update-oauth-config.ps1` aus.
+> Nach dem Deployment müssen die angezeigten Redirect-URLs in der Google Cloud Console eingetragen werden.
 
-MIT
+### Teardown
+
+```powershell
+# EKS-Cluster zerstören (VPC & ECR bleiben erhalten)
+.\scripts\destroy-eks.ps1
+
+# Basis-Infrastruktur komplett entfernen (optional)
+cd infra\base && terraform destroy
+```
+
+### Script-Übersicht
+
+| Script | Beschreibung |
+|--------|-------------|
+| `bootstrap-state.ps1` | Erstellt einmalig den S3-Bucket und die DynamoDB-Tabelle für das Terraform Remote State Backend. |
+| `create-oauth-secret.ps1` | Speichert die Google OAuth-Credentials und einen generierten JWT-Secret im AWS Secrets Manager. |
+| `build-and-push.ps1` | Führt Backend- und Frontend-Tests aus, baut die Docker-Images und pusht sie in die ECR-Repositories. |
+| `create-cluster.ps1` | Provisioniert den EKS-Cluster via Terraform, konfiguriert kubectl und deployt die gesamte Anwendung. |
+| `deploy-app.ps1` | Deployt alle Kubernetes-Ressourcen (Namespace, ConfigMaps, Secrets, Deployments, Services, Ingress) in den EKS-Cluster. |
+| `update-oauth-config.ps1` | Aktualisiert nach dem Deployment die OAuth-ConfigMap mit der korrekten Domain-URL und optional den Route 53 DNS-Eintrag. |
+| `destroy-eks.ps1` | Räumt alle Kubernetes-Ressourcen auf und zerstört den EKS-Cluster via Terraform, lässt die Basis-Infrastruktur (VPC, ECR) bestehen. |
+
+## Lizenz
+Uniprojekt der Hochschule der Medien Stuttgart. Alle Rechte vorbehalten. Nicht für kommerzielle Zwecke verwenden.
